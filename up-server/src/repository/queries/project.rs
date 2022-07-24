@@ -2,6 +2,7 @@ use std::fmt::Write as _;
 
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use sea_query::{Expr, InsertStatement, Query, QueryBuilder, SelectStatement, UpdateStatement};
+use sqlx::Row;
 use tracing::Level;
 use uuid::Uuid;
 
@@ -9,17 +10,34 @@ use super::{bind_query, maybe_field_value};
 use crate::{
     database::{DbPool, DbQueryBuilder, DbRow},
     repository::{
-        dto::check::{Check, Field},
-        queries::{account::get_account_id, project::get_project_id},
+        dto::project::{Field, Project},
+        queries::account::get_account_id,
         RepositoryError, Result,
     },
 };
 
-pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &str) -> Result<Check> {
+pub async fn get_project_id(pool: &DbPool, uuid: &str) -> Result<i64> {
+    let (sql, params) = read_statement(&[Field::Id])
+        .and_where(Expr::col(Field::Uuid).eq(uuid))
+        .build(DbQueryBuilder::default());
+    let row = bind_query(sqlx::query(&sql), &params)
+        .fetch_optional(pool)
+        .await?;
+    if let Some(row) = row {
+        Ok(row.try_get("id")?)
+    } else {
+        return Err(RepositoryError::InvalidArgument(
+            "project_id".to_string(),
+            format!("{} does not exist", uuid),
+        ));
+    }
+}
+
+pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &str) -> Result<Project> {
     tracing::trace!(
         select = format!("{:?}", select_fields),
         uuid = uuid,
-        "reading check"
+        "reading project"
     );
 
     let (sql, params) = read_statement(select_fields)
@@ -33,10 +51,10 @@ pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &str) -> Res
         .ok_or(RepositoryError::NotFound)?
 }
 
-pub async fn read_all(pool: &DbPool, select_fields: &[Field]) -> Result<Vec<Check>> {
+pub async fn read_all(pool: &DbPool, select_fields: &[Field]) -> Result<Vec<Project>> {
     tracing::trace!(
         select = format!("{:?}", select_fields),
-        "reading all checks"
+        "reading all projects"
     );
 
     let (sql, params) = read_statement(select_fields).build(DbQueryBuilder::default());
@@ -53,21 +71,19 @@ pub async fn insert(
     pool: &DbPool,
     select_fields: &[Field],
     account_uuid: &str,
-    project_uuid: &str,
     name: &str,
-) -> Result<Check> {
+) -> Result<Project> {
     tracing::trace!(
         select = format!("{:?}", select_fields),
         account_uuid = account_uuid,
         name = name,
-        "creating check"
+        "creating project"
     );
 
     let account_id = get_account_id(pool, account_uuid).await?;
-    let project_id = get_project_id(pool, project_uuid).await?;
 
-    let (sql, params) = insert_statement(select_fields, account_id, project_id, name)?
-        .build(DbQueryBuilder::default());
+    let (sql, params) =
+        insert_statement(select_fields, account_id, name)?.build(DbQueryBuilder::default());
 
     let row = bind_query(sqlx::query(&sql), &params)
         .fetch_one(pool)
@@ -82,7 +98,7 @@ pub async fn update(
     uuid: &str,
     select_fields: &[Field],
     update_fields: Vec<(Field, sea_query::Value)>,
-) -> Result<(bool, Check)> {
+) -> Result<(bool, Project)> {
     let update_params: Vec<(Field, sea_query::Value)> = update_fields
         .into_iter()
         .filter(|i| Field::updatable().contains(&i.0))
@@ -124,7 +140,7 @@ pub async fn update(
 }
 
 pub async fn delete(pool: &DbPool, uuid: &str) -> Result<bool> {
-    tracing::trace!(uuid = uuid, "deleting check");
+    tracing::trace!(uuid = uuid, "deleting project");
 
     let (sql, params) = update_statement(&[
         (Field::Deleted, true.into()),
@@ -155,7 +171,6 @@ fn read_statement(selected_fields: &[Field]) -> SelectStatement {
 fn insert_statement(
     select_fields: &[Field],
     account_id: i64,
-    project_id: i64,
     name: &str,
 ) -> Result<InsertStatement> {
     let mut statement = Query::insert();
@@ -167,7 +182,6 @@ fn insert_statement(
         .into_table(Field::Table)
         .columns([
             Field::AccountId,
-            Field::ProjectId,
             Field::Uuid,
             Field::Name,
             Field::CreatedAt,
@@ -175,7 +189,6 @@ fn insert_statement(
         ])
         .values(vec![
             account_id.into(),
-            project_id.into(),
             id.to_string().into(),
             name.into(),
             now.into(),
@@ -200,13 +213,13 @@ fn update_statement(values: &[(Field, sea_query::Value)]) -> UpdateStatement {
     statement
 }
 
-fn from_row(row: &DbRow, select_fields: &[Field]) -> Result<Check> {
+fn from_row(row: &DbRow, select_fields: &[Field]) -> Result<Project> {
     let created_at: Option<NaiveDateTime> =
         maybe_field_value(row, select_fields, &Field::CreatedAt)?;
     let updated_at: Option<NaiveDateTime> =
         maybe_field_value(row, select_fields, &Field::UpdatedAt)?;
     let uuid: Option<String> = maybe_field_value(row, select_fields, &Field::Uuid)?;
-    Ok(Check {
+    Ok(Project {
         uuid: uuid.and_then(|u| u.parse().ok()),
         name: maybe_field_value(row, select_fields, &Field::Name)?,
         created_at: created_at.map(|v| Utc.from_utc_datetime(&v)),

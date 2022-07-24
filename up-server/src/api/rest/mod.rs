@@ -6,7 +6,9 @@ use thiserror::Error;
 
 use crate::repository::RepositoryError;
 
-pub mod check;
+pub mod checks;
+pub mod projects;
+
 mod model;
 
 #[derive(Error, Debug)]

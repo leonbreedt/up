@@ -5,6 +5,7 @@ pub use sea_query_driver_sqlite::bind_query;
 
 pub mod account;
 pub mod check;
+pub mod project;
 
 use sqlx::{Row, ValueRef};
 

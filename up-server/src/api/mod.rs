@@ -7,7 +7,10 @@ use axum::{
     routing::{delete, get, patch, post},
     Extension, Json, Router,
 };
-use hyper::{Body, Uri};
+use hyper::{
+    header::{CONTENT_LENGTH, CONTENT_TYPE},
+    Body, Uri,
+};
 use serde_json::json;
 
 mod rest;
@@ -19,11 +22,16 @@ pub fn build(database: Database) -> Router {
     let repository = Repository::new(database);
 
     let router = Router::new()
-        .route("/api/checks", get(rest::check::read_all))
-        .route("/api/checks", post(rest::check::create))
-        .route("/api/checks/:id", get(rest::check::read_one))
-        .route("/api/checks/:id", patch(rest::check::update))
-        .route("/api/checks/:id", delete(rest::check::delete))
+        .route("/api/checks", get(rest::checks::read_all))
+        .route("/api/checks", post(rest::checks::create))
+        .route("/api/checks/:id", get(rest::checks::read_one))
+        .route("/api/checks/:id", patch(rest::checks::update))
+        .route("/api/checks/:id", delete(rest::checks::delete))
+        .route("/api/projects", get(rest::projects::read_all))
+        .route("/api/projects", post(rest::projects::create))
+        .route("/api/projects/:id", get(rest::projects::read_one))
+        .route("/api/projects/:id", patch(rest::projects::update))
+        .route("/api/projects/:id", delete(rest::projects::delete))
         .route("/", get(ui::index_handler))
         .layer(Extension(repository))
         .layer(middleware::from_fn(error_middleware))
@@ -45,22 +53,31 @@ async fn not_found_handler(uri: Uri) -> impl IntoResponse {
 
 async fn error_middleware<B>(req: Request<B>, next: Next<B>) -> Response {
     let response = next.run(req).await;
-    let (head, body) = response.into_parts();
+    let (mut head, body) = response.into_parts();
     let body_bytes = hyper::body::to_bytes(body)
         .await
         .expect("failed to convert error response into bytes");
 
-    let body = if head.status == StatusCode::UNPROCESSABLE_ENTITY {
+    let (body, size) = if head.status == StatusCode::UNPROCESSABLE_ENTITY {
         let json_body = serde_json::to_string(&json!({
             "result": "failure",
             "message": std::str::from_utf8(&body_bytes).expect("failed to parse error response"),
         }))
         .expect("failed to create error JSON body");
 
-        Body::from(Bytes::from(json_body.as_bytes().to_vec()))
+        let bytes = Bytes::from(json_body.as_bytes().to_vec());
+        let size = bytes.len();
+
+        head.headers
+            .insert(CONTENT_TYPE, "application/json".parse().unwrap());
+
+        (Body::from(bytes), size)
     } else {
-        Body::from(body_bytes)
+        let size = body_bytes.len();
+        (Body::from(body_bytes), size)
     };
+
+    head.headers.insert(CONTENT_LENGTH, size.into());
 
     Response::from_parts(head, boxed(body))
 }

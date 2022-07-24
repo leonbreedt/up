@@ -7,31 +7,24 @@ use uuid::Uuid;
 
 use super::ModelField;
 
-pub struct Check {
+pub struct Project {
     pub uuid: Option<Uuid>,
     pub name: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Field {
     Table,
     Id,
     AccountId,
-    ProjectId,
     Uuid,
     Name,
     CreatedAt,
     UpdatedAt,
     Deleted,
     DeletedAt,
-}
-
-impl Iden for Field {
-    fn unquoted(&self, s: &mut dyn std::fmt::Write) {
-        write!(s, "{}", self.as_ref()).unwrap();
-    }
 }
 
 impl Field {
@@ -44,32 +37,20 @@ impl Field {
     }
 }
 
-lazy_static! {
-    static ref NAME_TO_FIELD: HashMap<String, Field> = vec![
-        (Field::Id.to_string(), Field::Id),
-        (Field::AccountId.to_string(), Field::AccountId),
-        (Field::ProjectId.to_string(), Field::ProjectId),
-        (Field::Uuid.to_string(), Field::Uuid),
-        (Field::Name.to_string(), Field::Name),
-        (Field::CreatedAt.to_string(), Field::CreatedAt),
-        (Field::UpdatedAt.to_string(), Field::UpdatedAt),
-        (Field::Deleted.to_string(), Field::Deleted),
-        (Field::DeletedAt.to_string(), Field::DeletedAt),
-    ]
-    .into_iter()
-    .collect();
-    static ref ALL_FIELDS: Vec<Field> = NAME_TO_FIELD.values().cloned().collect();
-}
-
 impl ModelField for Field {}
+
+impl Iden for Field {
+    fn unquoted(&self, s: &mut dyn std::fmt::Write) {
+        write!(s, "{}", self.as_ref()).unwrap();
+    }
+}
 
 impl AsRef<str> for Field {
     fn as_ref(&self) -> &str {
         match self {
-            Self::Table => "checks",
+            Self::Table => "projects",
             Self::Id => "id",
             Self::AccountId => "account_id",
-            Self::ProjectId => "project_id",
             Self::Uuid => "uuid",
             Self::Name => "name",
             Self::CreatedAt => "created_at",
@@ -80,14 +61,30 @@ impl AsRef<str> for Field {
     }
 }
 
+lazy_static! {
+    static ref NAME_TO_FIELD: HashMap<&'static str, Field> = vec![
+        (Field::Id.as_ref(), Field::Id),
+        (Field::AccountId.as_ref(), Field::AccountId),
+        (Field::Uuid.as_ref(), Field::Uuid),
+        (Field::Name.as_ref(), Field::Name),
+        (Field::CreatedAt.as_ref(), Field::CreatedAt),
+        (Field::UpdatedAt.as_ref(), Field::UpdatedAt),
+        (Field::Deleted.as_ref(), Field::Deleted),
+        (Field::DeletedAt.as_ref(), Field::DeletedAt),
+    ]
+    .into_iter()
+    .collect();
+    static ref ALL_FIELDS: Vec<Field> = NAME_TO_FIELD.values().cloned().collect();
+}
+
 impl FromStr for Field {
     type Err = anyhow::Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         if let Some(field) = NAME_TO_FIELD.get(value) {
-            Ok(*field)
+            Ok(field.clone())
         } else {
-            anyhow::bail!("unsupported Check variant '{}'", value);
+            anyhow::bail!("unsupported Project variant '{}'", value);
         }
     }
 }
