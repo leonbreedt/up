@@ -1950,6 +1950,7 @@ dependencies = [
  "directories",
  "futures",
  "futures-util",
+ "hyper",
  "lazy_static",
  "mime_guess",
  "rust-embed",

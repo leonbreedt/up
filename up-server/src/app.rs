@@ -70,7 +70,7 @@ impl App {
             port = self.args.listen_address.port(),
             url = format!(
                 "http://{}:{}",
-                self.args.listen_address.ip().to_string(),
+                self.args.listen_address.ip(),
                 self.args.listen_address.port()
             ),
             "server started"

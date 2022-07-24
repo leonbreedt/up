@@ -8,9 +8,9 @@ use crate::{
 
 use super::bind_query;
 
-pub async fn get_account_id(pool: &DbPool, key: &str) -> Result<i64> {
+pub async fn get_account_id(pool: &DbPool, uuid: &str) -> Result<i64> {
     let (sql, params) = read_statement(&[Field::Id])
-        .and_where(Expr::col(Field::Key).eq(key))
+        .and_where(Expr::col(Field::Uuid).eq(uuid))
         .build(DbQueryBuilder::default());
     let row = bind_query(sqlx::query(&sql), &params)
         .fetch_optional(pool)
@@ -19,8 +19,8 @@ pub async fn get_account_id(pool: &DbPool, key: &str) -> Result<i64> {
         Ok(row.try_get("id")?)
     } else {
         return Err(RepositoryError::InvalidArgument(
-            "account_key".to_string(),
-            format!("{} does not exist", key),
+            "account_id".to_string(),
+            format!("{} does not exist", uuid),
         ));
     }
 }

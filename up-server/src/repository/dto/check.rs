@@ -81,7 +81,7 @@ impl FromStr for Field {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         if let Some(field) = NAME_TO_FIELD.get(value) {
-            Ok(field.clone())
+            Ok(*field)
         } else {
             anyhow::bail!("unsupported Checks variant '{}'", value);
         }

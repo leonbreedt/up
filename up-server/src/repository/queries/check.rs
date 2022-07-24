@@ -1,9 +1,12 @@
+use std::fmt::Write as _;
+
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use sea_query::{
     Expr, InsertStatement, PostgresQueryBuilder, Query, QueryBuilder, SelectStatement,
     UpdateStatement,
 };
 use tracing::Level;
+use uuid::Uuid;
 
 use super::{bind_query, maybe_field_value};
 use crate::{
@@ -91,13 +94,14 @@ pub async fn update(
     if tracing::event_enabled!(Level::TRACE) {
         let mut fields_to_update = String::from("[");
         for field in update_params.iter() {
-            fields_to_update.push_str(&format!(
+            let _ = write!(
+                fields_to_update,
                 "{}={}",
                 field.0.as_ref(),
                 query_builder.value_to_string(&field.1)
-            ));
+            );
         }
-        fields_to_update.push_str("]");
+        fields_to_update.push(']');
         tracing::trace!(uuid = uuid, fields = fields_to_update, "updating check");
     }
 
@@ -157,16 +161,24 @@ fn insert_statement(
     let mut statement = Query::insert();
 
     let now = Utc::now();
+    let id = Uuid::new_v4();
 
     statement
         .into_table(Field::Table)
         .columns([
             Field::AccountId,
+            Field::Uuid,
             Field::Name,
             Field::CreatedAt,
             Field::UpdatedAt,
         ])
-        .values(vec![account_id.into(), name.into(), now.into(), now.into()])?
+        .values(vec![
+            account_id.into(),
+            id.to_string().into(),
+            name.into(),
+            now.into(),
+            now.into(),
+        ])?
         .returning(Query::returning().columns(select_fields.to_vec()));
 
     Ok(statement)
@@ -192,8 +204,8 @@ fn from_row(row: &DbRow, select_fields: &[Field]) -> Result<Check> {
     let updated_at: Option<NaiveDateTime> =
         maybe_field_value(row, select_fields, &Field::UpdatedAt)?;
     Ok(Check {
-        uuid: maybe_field_value(&row, select_fields, &Field::Uuid)?,
-        name: maybe_field_value(&row, select_fields, &Field::Name)?,
+        uuid: maybe_field_value(row, select_fields, &Field::Uuid)?,
+        name: maybe_field_value(row, select_fields, &Field::Name)?,
         created_at: created_at.map(|v| Utc.from_utc_datetime(&v)),
         updated_at: updated_at.map(|v| Utc.from_utc_datetime(&v)),
     })

@@ -10,7 +10,6 @@ pub enum Field {
     Table,
     Id,
     Uuid,
-    Key,
     CreatedAt,
     Deleted,
     DeletedAt,
@@ -30,7 +29,6 @@ impl AsRef<str> for Field {
             Self::Table => "accounts",
             Self::Id => "id",
             Self::Uuid => "uuid",
-            Self::Key => "key",
             Self::CreatedAt => "created_at",
             Self::Deleted => "deleted",
             Self::DeletedAt => "deleted_at",
@@ -42,7 +40,6 @@ lazy_static! {
     static ref NAME_TO_FIELD: HashMap<&'static str, Field> = vec![
         (Field::Id.as_ref(), Field::Id),
         (Field::Uuid.as_ref(), Field::Uuid),
-        (Field::Key.as_ref(), Field::Key),
         (Field::CreatedAt.as_ref(), Field::CreatedAt),
         (Field::Deleted.as_ref(), Field::Deleted),
         (Field::DeletedAt.as_ref(), Field::DeletedAt),

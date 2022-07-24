@@ -19,6 +19,9 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
             ApiError::Repository(e) => match e {
+                RepositoryError::InvalidArgument(_, _) => {
+                    (StatusCode::BAD_REQUEST, format!("{}", e))
+                }
                 RepositoryError::NotFound => (StatusCode::NOT_FOUND, format!("{}", e)),
                 _ => (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)),
             },
