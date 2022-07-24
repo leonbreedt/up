@@ -1,0 +1,5 @@
+target
+up-server/target
+up-ui/node_modules
+up-ui/out
+up-ui/.next
