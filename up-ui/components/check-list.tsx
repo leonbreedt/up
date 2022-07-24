@@ -1,10 +1,10 @@
 import React from 'react';
-import Project from '../models/project';
+import Check from '../models/check';
 import useSWR from 'swr';
 import fetcher from '../lib/fetcher';
 
-function ProjectList() {
-  const { data } = useSWR<Project[]>('/api/projects', fetcher);
+function CheckList() {
+  const { data } = useSWR<Check[]>('/api/checks', fetcher);
   return (
     <>
       <table>
@@ -16,11 +16,11 @@ function ProjectList() {
         </thead>
         <tbody>
           {data ? (
-            data.map((project) => (
-              <tr key={project.id}>
-                <td>{project.name}</td>
+            data.map((check) => (
+              <tr key={check.id}>
+                <td>{check.name}</td>
                 <td>
-                  <a href={`/projects/${project.id}`}>Edit</a>
+                  <a href={`/checks/${check.id}`}>Edit</a>
                 </td>
               </tr>
             ))
@@ -35,4 +35,4 @@ function ProjectList() {
   );
 }
 
-export default ProjectList;
+export default CheckList;
