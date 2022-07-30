@@ -1,9 +1,13 @@
-use std::{net::SocketAddr, process};
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use miette::{IntoDiagnostic, Result};
 use argh::FromArgs;
 use tracing_subscriber::EnvFilter;
 
 use crate::{api, database};
+
+static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 
 pub struct App {
     args: Args,
@@ -16,7 +20,13 @@ impl App {
         }
     }
 
-    pub async fn run(&self) {
+    pub fn json_output() -> bool {
+        JSON_OUTPUT.load(Ordering::Relaxed)
+    }
+
+    pub async fn run(&self) -> Result<()> {
+        miette::set_panic_hook();
+
         if std::env::var_os("RUST_BACKTRACE").is_none() {
             std::env::set_var("RUST_BACKTRACE", "1")
         }
@@ -26,34 +36,26 @@ impl App {
         }
 
         if self.args.json {
+            JSON_OUTPUT.store(true, Ordering::Relaxed);
             tracing_subscriber::fmt::fmt()
                 .json()
                 .with_env_filter(EnvFilter::from_default_env())
                 .init();
         } else {
+            JSON_OUTPUT.store(false, Ordering::Relaxed);
             tracing_subscriber::fmt::fmt()
                 .with_env_filter(EnvFilter::from_default_env())
                 .init();
         }
 
-        let database = match database::connect(
+        let database = database::connect(
             &self.args.database_url,
             1,
             self.args.database_max_connections,
         )
-        .await
-        {
-            Ok(database) => database,
-            Err(e) => {
-                tracing::error!(err = format!("{}", e), "failed to connect to database");
-                process::exit(1);
-            }
-        };
+        .await?;
 
-        if let Err(e) = database.migrate().await {
-            tracing::error!(err = format!("{}", e), "failed to migrate database schema");
-            process::exit(1);
-        }
+        database.migrate().await?;
 
         let router = api::build(database);
 
@@ -70,8 +72,9 @@ impl App {
 
         axum::Server::bind(&self.args.listen_address)
             .serve(router.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap();
+            .await.into_diagnostic()?;
+
+        Ok(())
     }
 }
 

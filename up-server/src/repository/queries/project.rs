@@ -16,9 +16,11 @@ use crate::{
     },
 };
 
+const ENTITY_PROJECT: &str = "project";
+
 pub async fn get_project_id(pool: &DbPool, uuid: &Uuid) -> Result<i64> {
     let (sql, params) = read_statement(&[Field::Id])
-        .and_where(Expr::col(Field::Uuid).eq(uuid.clone()))
+        .and_where(Expr::col(Field::Uuid).eq(*uuid))
         .build(DbQueryBuilder::default());
     let row = bind_query(sqlx::query(&sql), &params)
         .fetch_optional(pool)
@@ -26,10 +28,10 @@ pub async fn get_project_id(pool: &DbPool, uuid: &Uuid) -> Result<i64> {
     if let Some(row) = row {
         Ok(row.try_get("id")?)
     } else {
-        return Err(RepositoryError::InvalidArgument(
-            "project_id".to_string(),
-            format!("{} does not exist", uuid),
-        ));
+        Err(RepositoryError::NotFound {
+            entity_type: ENTITY_PROJECT.to_string(),
+            id: uuid.to_string()
+        })
     }
 }
 
@@ -41,14 +43,14 @@ pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &Uuid) -> Re
     );
 
     let (sql, params) = read_statement(select_fields)
-        .and_where(Expr::col(Field::Uuid).eq(uuid.clone()))
+        .and_where(Expr::col(Field::Uuid).eq(*uuid))
         .build(DbQueryBuilder::default());
 
     bind_query(sqlx::query(&sql), &params)
         .fetch_optional(pool)
         .await?
         .map(|row| from_row(&row, select_fields))
-        .ok_or(RepositoryError::NotFound)?
+        .ok_or_else(|| RepositoryError::NotFound {entity_type: ENTITY_PROJECT.to_string(), id: uuid.to_string()})?
 }
 
 pub async fn read_all(pool: &DbPool, select_fields: &[Field]) -> Result<Vec<Project>> {
@@ -123,7 +125,7 @@ pub async fn update(
     let mut updated = false;
     if !update_params.is_empty() {
         let (sql, params) = update_statement(&update_params)
-            .and_where(Expr::col(Field::Uuid).eq(uuid.clone()))
+            .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .and_where(Expr::col(Field::Deleted).eq(false))
             .build(query_builder);
 
@@ -146,7 +148,7 @@ pub async fn delete(pool: &DbPool, uuid: &Uuid) -> Result<bool> {
         (Field::Deleted, true.into()),
         (Field::DeletedAt, Utc::now().into()),
     ])
-    .and_where(Expr::col(Field::Uuid).eq(uuid.clone()))
+    .and_where(Expr::col(Field::Uuid).eq(*uuid))
     .build(DbQueryBuilder::default());
 
     let rows_deleted = bind_query(sqlx::query(&sql), &params)

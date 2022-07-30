@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use anyhow::Result;
+use miette::{IntoDiagnostic, Result, WrapErr, Diagnostic};
 use sqlx::{migrate::Migrator, ConnectOptions};
 use tracing::log::LevelFilter;
+use thiserror::Error;
 
 pub type DbConnectOptions = sqlx::postgres::PgConnectOptions;
 pub type DbPool = sqlx::postgres::PgPool;
@@ -19,16 +20,32 @@ pub struct Database {
     pool: DbPool,
 }
 
+#[derive(Error, Diagnostic, Debug)]
+pub enum DatabaseError {
+    #[error("failed to parse URL '{0}'")]
+    #[diagnostic(code(up::error::bad_argument))]
+    MalformedUrl(String, #[source] sqlx::Error),
+    #[error("SQL error: {0}")]
+    #[diagnostic(code(up::error::sql))]
+    GenericSqlError(#[from] sqlx::Error)
+}
+
 impl Database {
     async fn new(url: &str, min_connections: u32, max_connections: u32) -> Result<Self> {
-        let mut connection_options: DbConnectOptions = url.parse()?;
+        let mut connection_options: DbConnectOptions = url.parse()
+            .map_err(|e| DatabaseError::MalformedUrl(url.to_string(), e))?;
+
         connection_options.log_statements(LevelFilter::Trace);
         connection_options.log_slow_statements(LevelFilter::Info, SLOW_STATEMENT_THRESHOLD_MS);
+
         let pool = DbPoolOptions::new()
             .min_connections(min_connections)
             .max_connections(max_connections)
             .connect_with(connection_options)
-            .await?;
+            .await
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to connect to database using URL '{}'", url))?;
+
         tracing::debug!(
             url = url,
             min_connections = min_connections,
@@ -50,7 +67,8 @@ impl Database {
         let result = MIGRATOR
             .run(&self.pool)
             .await
-            .map_err(|e| anyhow::anyhow!(e));
+            .into_diagnostic()
+            .wrap_err_with(|| "failed to perform database migration".to_string());
 
         if result.is_ok() {
             tracing::debug!(
@@ -69,7 +87,5 @@ impl Database {
 
 pub async fn connect(url: &str, min_connections: u32, max_connections: u32) -> Result<Database> {
     tracing::debug!(url = url, "connecting to database");
-    Database::new(url, min_connections, max_connections)
-        .await
-        .map_err(|e| anyhow::anyhow!(e))
+    Database::new(url, min_connections, max_connections).await
 }

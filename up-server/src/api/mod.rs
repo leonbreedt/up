@@ -4,13 +4,14 @@ use axum::{
     http::{Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, post},
+    routing::{self, get, patch, post},
     Extension, Json, Router,
 };
 use hyper::{
     header::{CONTENT_LENGTH, CONTENT_TYPE},
     Body, Uri,
 };
+use mime_guess::mime::APPLICATION_JSON;
 use serde_json::json;
 
 mod rest;
@@ -26,12 +27,12 @@ pub fn build(database: Database) -> Router {
         .route("/api/checks", post(rest::checks::create))
         .route("/api/checks/:id", get(rest::checks::read_one))
         .route("/api/checks/:id", patch(rest::checks::update))
-        .route("/api/checks/:id", delete(rest::checks::delete))
+        .route("/api/checks/:id", routing::delete(rest::checks::delete))
         .route("/api/projects", get(rest::projects::read_all))
         .route("/api/projects", post(rest::projects::create))
         .route("/api/projects/:id", get(rest::projects::read_one))
         .route("/api/projects/:id", patch(rest::projects::update))
-        .route("/api/projects/:id", delete(rest::projects::delete))
+        .route("/api/projects/:id", routing::delete(rest::projects::delete))
         .route("/", get(ui::index_handler))
         .layer(Extension(repository))
         .layer(middleware::from_fn(error_middleware))
@@ -57,21 +58,30 @@ async fn error_middleware<B>(req: Request<B>, next: Next<B>) -> Response {
     let body_bytes = hyper::body::to_bytes(body)
         .await
         .expect("failed to convert error response into bytes");
+    let body_bytes_len = body_bytes.len();
 
     let (body, size) = if !head.status.is_success() {
-        let json_body = serde_json::to_string(&json!({
-            "result": "failure",
-            "message": std::str::from_utf8(&body_bytes).expect("failed to parse error response"),
-        }))
-        .expect("failed to create error JSON body");
+        if let Some(value) = head.headers.get(CONTENT_TYPE) {
+            if value != "application/json" {
+                let json_body = serde_json::to_string(&json!({
+                    "result": "failure",
+                    "message": std::str::from_utf8(&body_bytes).expect("failed to parse error response"),
+                }))
+                    .expect("failed to create error JSON body");
 
-        let bytes = Bytes::from(json_body.as_bytes().to_vec());
-        let size = bytes.len();
+                let bytes = Bytes::from(json_body.as_bytes().to_vec());
+                let size = bytes.len();
 
-        head.headers
-            .insert(CONTENT_TYPE, "application/json".parse().unwrap());
+                head.headers
+                    .insert(CONTENT_TYPE, "application/json".parse().unwrap());
 
-        (Body::from(bytes), size)
+                (Body::from(bytes), size)
+            } else {
+                (Body::from(body_bytes), body_bytes_len)
+            }
+        } else {
+            (Body::from(body_bytes), body_bytes_len)
+        }
     } else {
         let size = body_bytes.len();
         (Body::from(body_bytes), size)

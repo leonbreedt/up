@@ -1,4 +1,5 @@
 use thiserror::Error;
+use miette::Diagnostic;
 use uuid::Uuid;
 
 use crate::database::Database;
@@ -8,23 +9,27 @@ mod queries;
 
 use dto::{check, project};
 
-type Result<T> = std::result::Result<T, RepositoryError>;
+type Result<T> = miette::Result<T, RepositoryError>;
 
 #[derive(Clone)]
 pub struct Repository {
     database: Database,
 }
 
-#[derive(Debug, Error)]
+#[derive(Error, Diagnostic, Debug)]
 pub enum RepositoryError {
-    #[error("invalid argument {0}: {1}")]
-    InvalidArgument(String, String),
-    #[error("query failed: {0}")]
-    DatabaseError(#[from] sqlx::Error),
-    #[error("SQL generation failed: {0}")]
-    SqlGenerationError(#[from] sea_query::error::Error),
-    #[error("not found")]
-    NotFound,
+    #[error("{entity_type} does not exist")]
+    #[diagnostic(code(up::error::bad_argument))]
+    NotFound {
+        entity_type: String,
+        id: String
+    },
+    #[error("SQL query failed")]
+    #[diagnostic(code(up::error::sql))]
+    SqlQueryFailed(#[from] sqlx::Error),
+    #[error("failed to build SQL query")]
+    #[diagnostic(code(up::error::sql_query))]
+    BuildSqlQueryFailed(#[from] sea_query::error::Error),
 }
 
 impl Repository {

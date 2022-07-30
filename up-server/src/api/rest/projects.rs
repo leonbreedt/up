@@ -2,6 +2,7 @@ use axum::body::Empty;
 use axum::response::IntoResponse;
 use axum::{extract::Path, Extension, Json};
 use uuid::Uuid;
+use miette::Result;
 
 use crate::api::rest::{model::projects, ApiError};
 use crate::repository::{dto, Repository};
