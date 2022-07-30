@@ -11,7 +11,6 @@ use hyper::{
     header::{CONTENT_LENGTH, CONTENT_TYPE},
     Body, Uri,
 };
-use mime_guess::mime::APPLICATION_JSON;
 use serde_json::json;
 
 mod rest;

@@ -1,12 +1,11 @@
-use std::io;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use miette::{Diagnostic, GraphicalReportHandler, JSONReportHandler, MietteHandler};
+use miette::{Diagnostic, GraphicalReportHandler, JSONReportHandler};
 use serde_json::json;
 use thiserror::Error;
-use crate::app::App;
 
+use crate::app::App;
 use crate::repository::RepositoryError;
 
 pub mod checks;
