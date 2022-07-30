@@ -25,7 +25,7 @@ pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &Uuid) -> Re
     );
 
     let (sql, params) = read_statement(select_fields)
-        .and_where(Expr::col(Field::Uuid).eq(uuid.to_string()))
+        .and_where(Expr::col(Field::Uuid).eq(*uuid))
         .build(DbQueryBuilder::default());
 
     bind_query(sqlx::query(&sql), &params)
