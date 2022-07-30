@@ -58,7 +58,7 @@ async fn error_middleware<B>(req: Request<B>, next: Next<B>) -> Response {
         .await
         .expect("failed to convert error response into bytes");
 
-    let (body, size) = if head.status == StatusCode::UNPROCESSABLE_ENTITY {
+    let (body, size) = if !head.status.is_success() {
         let json_body = serde_json::to_string(&json!({
             "result": "failure",
             "message": std::str::from_utf8(&body_bytes).expect("failed to parse error response"),

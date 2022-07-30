@@ -1,4 +1,5 @@
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::database::Database;
 
@@ -34,7 +35,7 @@ impl Repository {
     pub async fn read_one_check(
         &self,
         select_fields: &[check::Field],
-        uuid: &str,
+        uuid: &Uuid,
     ) -> Result<check::Check> {
         queries::check::read_one(self.database.pool(), select_fields, uuid).await
     }
@@ -46,8 +47,8 @@ impl Repository {
     pub async fn create_check(
         &self,
         select_fields: &[check::Field],
-        account_uuid: &str,
-        project_uuid: &str,
+        account_uuid: &Uuid,
+        project_uuid: &Uuid,
         name: &str,
     ) -> Result<check::Check> {
         let check = queries::check::insert(
@@ -61,7 +62,7 @@ impl Repository {
         let uuid = check.uuid.as_ref().unwrap();
 
         tracing::trace!(
-            account_uuid = account_uuid,
+            account_uuid = account_uuid.to_string(),
             uuid = uuid.to_string(),
             name = name,
             "check created"
@@ -72,7 +73,7 @@ impl Repository {
 
     pub async fn update_check(
         &self,
-        uuid: &str,
+        uuid: &Uuid,
         select_fields: &[check::Field],
         update_fields: Vec<(check::Field, sea_query::Value)>,
     ) -> Result<(bool, check::Check)> {
@@ -81,19 +82,19 @@ impl Repository {
                 .await?;
 
         if updated {
-            tracing::trace!(uuid = uuid, "check updated");
+            tracing::trace!(uuid = uuid.to_string(), "check updated");
         } else {
-            tracing::trace!(uuid = uuid, "no change, check not updated");
+            tracing::trace!(uuid = uuid.to_string(), "no change, check not updated");
         }
 
         Ok((updated, check))
     }
 
-    pub async fn delete_check(&self, uuid: &str) -> Result<bool> {
+    pub async fn delete_check(&self, uuid: &Uuid) -> Result<bool> {
         let deleted = queries::check::delete(self.database.pool(), uuid).await?;
 
         if deleted {
-            tracing::trace!(uuid = uuid, "check deleted");
+            tracing::trace!(uuid = uuid.to_string(), "check deleted");
         }
 
         Ok(deleted)
@@ -102,7 +103,7 @@ impl Repository {
     pub async fn read_one_project(
         &self,
         select_fields: &[project::Field],
-        uuid: &str,
+        uuid: &Uuid,
     ) -> Result<project::Project> {
         queries::project::read_one(self.database.pool(), select_fields, uuid).await
     }
@@ -117,7 +118,7 @@ impl Repository {
     pub async fn create_project(
         &self,
         select_fields: &[project::Field],
-        account_uuid: &str,
+        account_uuid: &Uuid,
         name: &str,
     ) -> Result<project::Project> {
         let project =
@@ -126,7 +127,7 @@ impl Repository {
         let uuid = project.uuid.as_ref().unwrap();
 
         tracing::trace!(
-            account_uuid = account_uuid,
+            account_uuid = account_uuid.to_string(),
             uuid = uuid.to_string(),
             name = name,
             "project created"
@@ -137,7 +138,7 @@ impl Repository {
 
     pub async fn update_project(
         &self,
-        uuid: &str,
+        uuid: &Uuid,
         select_fields: &[project::Field],
         update_fields: Vec<(project::Field, sea_query::Value)>,
     ) -> Result<(bool, project::Project)> {
@@ -146,19 +147,19 @@ impl Repository {
                 .await?;
 
         if updated {
-            tracing::trace!(uuid = uuid, "project updated");
+            tracing::trace!(uuid = uuid.to_string(), "project updated");
         } else {
-            tracing::trace!(uuid = uuid, "no change, project not updated");
+            tracing::trace!(uuid = uuid.to_string(), "no change, project not updated");
         }
 
         Ok((updated, check))
     }
 
-    pub async fn delete_project(&self, uuid: &str) -> Result<bool> {
+    pub async fn delete_project(&self, uuid: &Uuid) -> Result<bool> {
         let deleted = queries::project::delete(self.database.pool(), uuid).await?;
 
         if deleted {
-            tracing::trace!(uuid = uuid, "project deleted");
+            tracing::trace!(uuid = uuid.to_string(), "project deleted");
         }
 
         Ok(deleted)

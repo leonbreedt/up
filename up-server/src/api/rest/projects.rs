@@ -1,12 +1,13 @@
 use axum::body::Empty;
 use axum::response::IntoResponse;
 use axum::{extract::Path, Extension, Json};
+use uuid::Uuid;
 
 use crate::api::rest::{model::projects, ApiError};
 use crate::repository::{dto, Repository};
 
 pub async fn read_one(
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     repository: Extension<Repository>,
 ) -> Result<Json<projects::Project>, ApiError> {
     let project: projects::Project = repository
@@ -35,7 +36,7 @@ pub async fn create(
     let project = repository
         .create_project(
             dto::project::Field::all(),
-            &request.account_id.to_string(),
+            &request.account_id,
             &request.name,
         )
         .await?;
@@ -44,7 +45,7 @@ pub async fn create(
 }
 
 pub async fn update(
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     repository: Extension<Repository>,
     request: Json<projects::Update>,
 ) -> Result<Json<projects::Project>, ApiError> {
@@ -60,7 +61,7 @@ pub async fn update(
 }
 
 pub async fn delete(
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
     repository.delete_project(&id).await?;

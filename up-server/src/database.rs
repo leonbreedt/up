@@ -4,12 +4,12 @@ use anyhow::Result;
 use sqlx::{migrate::Migrator, ConnectOptions};
 use tracing::log::LevelFilter;
 
-pub type DbConnectOptions = sqlx::sqlite::SqliteConnectOptions;
-pub type DbPool = sqlx::sqlite::SqlitePool;
-pub type DbPoolOptions = sqlx::sqlite::SqlitePoolOptions;
-pub type DbQueryBuilder = sea_query::SqliteQueryBuilder;
-pub type DbRow = sqlx::sqlite::SqliteRow;
-pub type DbType = sqlx::Sqlite;
+pub type DbConnectOptions = sqlx::postgres::PgConnectOptions;
+pub type DbPool = sqlx::postgres::PgPool;
+pub type DbPoolOptions = sqlx::postgres::PgPoolOptions;
+pub type DbQueryBuilder = sea_query::PostgresQueryBuilder;
+pub type DbRow = sqlx::postgres::PgRow;
+pub type DbType = sqlx::Postgres;
 
 const SLOW_STATEMENT_THRESHOLD_MS: Duration = Duration::from_millis(100);
 static MIGRATOR: Migrator = sqlx::migrate!();
@@ -27,7 +27,7 @@ impl Database {
         let pool = DbPoolOptions::new()
             .min_connections(min_connections)
             .max_connections(max_connections)
-            .connect_with(connection_options.create_if_missing(true))
+            .connect_with(connection_options)
             .await?;
         tracing::debug!(
             url = url,

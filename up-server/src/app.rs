@@ -1,8 +1,6 @@
-use std::{fs, net::SocketAddr, process};
+use std::{net::SocketAddr, process};
 
 use argh::FromArgs;
-use camino::Utf8PathBuf;
-use directories::ProjectDirs;
 use tracing_subscriber::EnvFilter;
 
 use crate::{api, database};
@@ -38,11 +36,6 @@ impl App {
                 .init();
         }
 
-        if let Err(e) = fs::create_dir_all(&self.args.data_dir) {
-            tracing::error!(err = format!("{}", e), "failed to create data dir");
-            process::exit(1);
-        }
-
         let database = match database::connect(
             &self.args.database_url,
             1,
@@ -65,7 +58,6 @@ impl App {
         let router = api::build(database);
 
         tracing::debug!(
-            data_dir = self.args.data_dir.as_str(),
             ip = self.args.listen_address.ip().to_string().as_str(),
             port = self.args.listen_address.port(),
             url = format!(
@@ -92,15 +84,12 @@ struct Args {
         default = "SocketAddr::from(([127, 0, 0, 1], default_listen_port()))"
     )]
     listen_address: SocketAddr,
-    /// the database URL to connect to (default: sqlite://DATA_DIR/up.db, or DATABASE_URL environment variable)
+    /// the database URL to connect to (default: postgres://127.0.0.1:5432/up, or DATABASE_URL environment variable)
     #[argh(option, default = "default_database_url()")]
     database_url: String,
     /// the maximum number of connections in the PostgreSQL connection pool (default: 20, or DATABASE_MAX_CONNECTIONS environment variable)
     #[argh(option, default = "default_database_max_connections()")]
     database_max_connections: u32,
-    /// directory in which to store database file and any other temporary files (default: OS local app data dir)
-    #[argh(option, default = "default_data_dir()")]
-    data_dir: Utf8PathBuf,
     /// use JSON for log messages
     #[argh(switch)]
     json: bool,
@@ -121,18 +110,14 @@ fn default_listen_port() -> u16 {
     }
 }
 
-fn default_data_dir() -> Utf8PathBuf {
-    Utf8PathBuf::from_path_buf(
-        ProjectDirs::from("io", "sector42", "up")
-            .expect("failed to determine OS-specific app dir")
-            .data_local_dir()
-            .to_owned(),
-    )
-    .unwrap()
-}
+const DEFAULT_DATABASE_URL: &str = "postgres://127.0.0.1:5432/up";
 
 fn default_database_url() -> String {
-    format!("sqlite://{}/up.db", default_data_dir().as_str())
+    if let Ok(value) = std::env::var("DATABASE_URL") {
+        value
+    } else {
+        DEFAULT_DATABASE_URL.to_string()
+    }
 }
 
 const DEFAULT_DATABASE_MAX_CONNECTIONS: u32 = 4;

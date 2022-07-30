@@ -1,12 +1,13 @@
 use axum::body::Empty;
 use axum::response::IntoResponse;
 use axum::{extract::Path, Extension, Json};
+use uuid::Uuid;
 
 use crate::api::rest::{model::checks, ApiError};
 use crate::repository::{dto, Repository};
 
 pub async fn read_one(
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     repository: Extension<Repository>,
 ) -> Result<Json<checks::Check>, ApiError> {
     let check: checks::Check = repository
@@ -35,8 +36,8 @@ pub async fn create(
     let check = repository
         .create_check(
             dto::check::Field::all(),
-            &request.account_id.to_string(),
-            &request.project_id.to_string(),
+            &request.account_id,
+            &request.project_id,
             &request.name,
         )
         .await?;
@@ -45,7 +46,7 @@ pub async fn create(
 }
 
 pub async fn update(
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     repository: Extension<Repository>,
     request: Json<checks::Update>,
 ) -> Result<Json<checks::Check>, ApiError> {
@@ -61,7 +62,7 @@ pub async fn update(
 }
 
 pub async fn delete(
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
     repository.delete_check(&id).await?;
