@@ -2,3 +2,4 @@ target
 .idea
 .env
 out
+999_test_data.sql

@@ -7,9 +7,42 @@ use uuid::Uuid;
 
 use super::ModelField;
 
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "schedule_type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScheduleType {
+    Simple,
+    Cron,
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "check_status", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CheckStatus {
+    Up,
+    Down,
+    Created,
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "period_units", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PeriodUnits {
+    Hours,
+    Minutes,
+    Days,
+}
+
 pub struct Check {
     pub uuid: Option<Uuid>,
+    pub ping_key: Option<String>,
     pub name: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<CheckStatus>,
+    pub schedule_type: Option<ScheduleType>,
+    pub ping_period: Option<i32>,
+    pub ping_period_units: Option<PeriodUnits>,
+    pub ping_cron_expression: Option<String>,
+    pub grace_period: Option<i32>,
+    pub grace_period_units: Option<PeriodUnits>,
+    pub last_ping_at: Option<DateTime<Utc>>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -22,7 +55,17 @@ pub enum Field {
     ProjectId,
     Uuid,
     ShortId,
+    PingKey,
     Name,
+    Description,
+    ScheduleType,
+    PingPeriod,
+    PingPeriodUnits,
+    PingCronExpression,
+    GracePeriod,
+    GracePeriodUnits,
+    Status,
+    LastPingAt,
     CreatedAt,
     UpdatedAt,
     Deleted,
@@ -41,7 +84,17 @@ impl Field {
     }
 
     pub fn updatable() -> &'static [Field] {
-        &[Field::Name, Field::AccountId]
+        &[
+            Field::Name,
+            Field::Description,
+            Field::ScheduleType,
+            Field::PingPeriod,
+            Field::PingPeriodUnits,
+            Field::PingCronExpression,
+            Field::GracePeriod,
+            Field::GracePeriodUnits,
+            Field::Status,
+        ]
     }
 }
 
@@ -52,7 +105,20 @@ lazy_static! {
         (Field::ProjectId.to_string(), Field::ProjectId),
         (Field::Uuid.to_string(), Field::Uuid),
         (Field::ShortId.to_string(), Field::ShortId),
+        (Field::PingKey.to_string(), Field::PingKey),
         (Field::Name.to_string(), Field::Name),
+        (Field::Description.to_string(), Field::Description),
+        (Field::ScheduleType.to_string(), Field::ScheduleType),
+        (Field::PingPeriod.to_string(), Field::PingPeriod),
+        (Field::PingPeriodUnits.to_string(), Field::PingPeriodUnits),
+        (
+            Field::PingCronExpression.to_string(),
+            Field::PingCronExpression
+        ),
+        (Field::GracePeriod.to_string(), Field::GracePeriod),
+        (Field::GracePeriodUnits.to_string(), Field::GracePeriodUnits),
+        (Field::Status.to_string(), Field::Status),
+        (Field::LastPingAt.to_string(), Field::LastPingAt),
         (Field::CreatedAt.to_string(), Field::CreatedAt),
         (Field::UpdatedAt.to_string(), Field::UpdatedAt),
         (Field::Deleted.to_string(), Field::Deleted),
@@ -74,7 +140,17 @@ impl AsRef<str> for Field {
             Self::ProjectId => "project_id",
             Self::Uuid => "uuid",
             Self::ShortId => "shortid",
+            Self::PingKey => "ping_key",
             Self::Name => "name",
+            Self::Description => "description",
+            Self::ScheduleType => "schedule_type",
+            Self::PingPeriod => "ping_period",
+            Self::PingPeriodUnits => "ping_period_units",
+            Self::PingCronExpression => "ping_cron_expression",
+            Self::GracePeriod => "grace_period",
+            Self::GracePeriodUnits => "grace_period_units",
+            Self::Status => "status",
+            Self::LastPingAt => "last_ping_at",
             Self::CreatedAt => "created_at",
             Self::UpdatedAt => "updated_at",
             Self::Deleted => "deleted",

@@ -214,6 +214,8 @@ fn update_statement(values: &[(Field, sea_query::Value)]) -> UpdateStatement {
 }
 
 fn from_row(row: &DbRow, select_fields: &[Field]) -> Result<Check> {
+    let last_ping_at: Option<NaiveDateTime> =
+        maybe_field_value(row, select_fields, &Field::LastPingAt)?;
     let created_at: Option<NaiveDateTime> =
         maybe_field_value(row, select_fields, &Field::CreatedAt)?;
     let updated_at: Option<NaiveDateTime> =
@@ -221,7 +223,17 @@ fn from_row(row: &DbRow, select_fields: &[Field]) -> Result<Check> {
     let uuid: Option<Uuid> = maybe_field_value(row, select_fields, &Field::Uuid)?;
     Ok(Check {
         uuid,
+        ping_key: None,
         name: maybe_field_value(row, select_fields, &Field::Name)?,
+        description: None,
+        status: maybe_field_value(row, select_fields, &Field::Status)?,
+        schedule_type: maybe_field_value(row, select_fields, &Field::ScheduleType)?,
+        ping_period: maybe_field_value(row, select_fields, &Field::PingPeriod)?,
+        ping_period_units: maybe_field_value(row, select_fields, &Field::PingPeriodUnits)?,
+        grace_period: maybe_field_value(row, select_fields, &Field::GracePeriod)?,
+        grace_period_units: maybe_field_value(row, select_fields, &Field::GracePeriodUnits)?,
+        ping_cron_expression: maybe_field_value(row, select_fields, &Field::PingCronExpression)?,
+        last_ping_at: last_ping_at.map(|v| Utc.from_utc_datetime(&v)),
         created_at: created_at.map(|v| Utc.from_utc_datetime(&v)),
         updated_at: updated_at.map(|v| Utc.from_utc_datetime(&v)),
     })

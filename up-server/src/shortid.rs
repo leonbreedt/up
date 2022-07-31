@@ -151,17 +151,17 @@ mod test {
 
     #[test]
     pub fn shortid_json_roundtrip() {
-        let id: ShortId = Uuid::from_str("45c544f4-36ac-4428-8f9e-187037a6c87b")
+        let id: ShortId = Uuid::from_str("001a4929-cd4e-4719-822c-4ec8fe8e743b")
             .unwrap()
             .into();
 
         assert_eq!(
-            "\"Xw8QKAZdNA3nnFKxopJ88kweGE\"",
+            "\"3VD6meanalQYGibQWDYXXqgw\"",
             serde_json::to_string(&id).unwrap()
         );
         assert_eq!(
             id,
-            serde_json::from_str("\"Xw8QKAZdNA3nnFKxopJ88kweGE\"").unwrap()
+            serde_json::from_str("\"3VD6meanalQYGibQWDYXXqgw\"").unwrap()
         );
     }
 }
