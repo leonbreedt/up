@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::{
     database::{DbPool, DbQueryBuilder},
     repository::{dto::account::Field, RepositoryError, Result},
+    shortid::ShortId,
 };
 
 use super::bind_query;
@@ -23,7 +24,7 @@ pub async fn get_account_id(pool: &DbPool, uuid: &Uuid) -> Result<i64> {
     } else {
         Err(RepositoryError::NotFound {
             entity_type: ENTITY_ACCOUNT.to_string(),
-            id: uuid.to_string()
+            id: ShortId::from_uuid(uuid).to_string(),
         })
     }
 }

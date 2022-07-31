@@ -1,18 +1,18 @@
 use axum::body::Empty;
 use axum::response::IntoResponse;
 use axum::{extract::Path, Extension, Json};
-use uuid::Uuid;
 use miette::Result;
 
 use crate::api::rest::{model::checks, ApiError};
 use crate::repository::{dto, Repository};
+use crate::shortid::ShortId;
 
 pub async fn read_one(
-    Path(id): Path<Uuid>,
+    Path(id): Path<ShortId>,
     repository: Extension<Repository>,
 ) -> Result<Json<checks::Check>, ApiError> {
     let check: checks::Check = repository
-        .read_one_check(dto::check::Field::all(), &id)
+        .read_one_check(dto::check::Field::all(), id.as_uuid())
         .await?
         .into();
     Ok(check.into())
@@ -37,8 +37,8 @@ pub async fn create(
     let check = repository
         .create_check(
             dto::check::Field::all(),
-            &request.account_id,
-            &request.project_id,
+            request.account_id.as_uuid(),
+            request.project_id.as_uuid(),
             &request.name,
         )
         .await?;
@@ -47,7 +47,7 @@ pub async fn create(
 }
 
 pub async fn update(
-    Path(id): Path<Uuid>,
+    Path(id): Path<ShortId>,
     repository: Extension<Repository>,
     request: Json<checks::Update>,
 ) -> Result<Json<checks::Check>, ApiError> {
@@ -56,16 +56,16 @@ pub async fn update(
         update_fields.push((dto::check::Field::Name, name.as_str().into()));
     }
     let (_, check) = repository
-        .update_check(&id, dto::check::Field::all(), update_fields)
+        .update_check(id.as_uuid(), dto::check::Field::all(), update_fields)
         .await?;
     let check: checks::Check = check.into();
     Ok(check.into())
 }
 
 pub async fn delete(
-    Path(id): Path<Uuid>,
+    Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.delete_check(&id).await?;
+    repository.delete_check(id.as_uuid()).await?;
     Ok(Empty::new())
 }

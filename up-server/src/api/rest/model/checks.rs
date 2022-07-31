@@ -1,14 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::repository::dto;
+use crate::{repository::dto, shortid::ShortId};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Create {
     // TODO: remove, this should be part of logged in context
-    pub account_id: Uuid,
-    pub project_id: Uuid,
+    pub account_id: ShortId,
+    pub project_id: ShortId,
     pub name: String,
 }
 
@@ -19,7 +18,7 @@ pub struct Update {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Check {
-    pub id: Uuid,
+    pub id: ShortId,
     pub name: String,
     pub created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29,7 +28,7 @@ pub struct Check {
 impl From<dto::check::Check> for Check {
     fn from(issue: dto::check::Check) -> Self {
         Self {
-            id: issue.uuid.unwrap(),
+            id: issue.uuid.unwrap().into(),
             name: issue.name.unwrap(),
             created_at: issue.created_at.unwrap(),
             updated_at: issue.updated_at,

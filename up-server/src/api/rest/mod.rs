@@ -23,12 +23,12 @@ pub enum ApiError {
 enum ReportType {
     Json,
     Graphical,
-    Narratable
+    Narratable,
 }
 
 struct ReportRenderer<'e>(ReportType, &'e RepositoryError);
 
-impl <'e> std::fmt::Display for ReportRenderer<'e> {
+impl<'e> std::fmt::Display for ReportRenderer<'e> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self.0 {
             ReportType::Json => JSONReportHandler::new().render_report(f, self.1),
@@ -51,16 +51,18 @@ impl IntoResponse for ApiError {
                 }
 
                 match e {
-                    RepositoryError::NotFound { entity_type, id } => {
-                        (StatusCode::NOT_FOUND, format!("{} with ID {} does not exist", entity_type, id))
-                    },
+                    RepositoryError::NotFound { entity_type, id } => (
+                        StatusCode::NOT_FOUND,
+                        format!("{} with ID {} does not exist", entity_type, id),
+                    ),
                     _ => {
-                        let mut messages: Vec<String> = format!("{}", ReportRenderer(ReportType::Narratable, &e))
-                            .split("\n")
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.to_string())
-                            .collect();
+                        let mut messages: Vec<String> =
+                            format!("{}", ReportRenderer(ReportType::Narratable, &e))
+                                .split('\n')
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_string())
+                                .collect();
 
                         let message = messages.remove(0);
                         for detail in messages.into_iter() {
@@ -68,7 +70,7 @@ impl IntoResponse for ApiError {
                         }
 
                         (StatusCode::INTERNAL_SERVER_ERROR, message)
-                    },
+                    }
                 }
             }
         };

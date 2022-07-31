@@ -14,6 +14,7 @@ chrono = { version = "0.4.19", features = ["serde"] }
 directories = "4.0.1"
 futures = "0.3.21"
 futures-util = "0.3.21"
+harsh = "0.2.2"
 lazy_static = "1.4.0"
 miette = { version = "5.1.1", features = ["fancy"] }
 mime_guess = "2.0.4"

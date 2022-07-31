@@ -1,18 +1,18 @@
 use axum::body::Empty;
 use axum::response::IntoResponse;
 use axum::{extract::Path, Extension, Json};
-use uuid::Uuid;
 use miette::Result;
 
 use crate::api::rest::{model::projects, ApiError};
 use crate::repository::{dto, Repository};
+use crate::shortid::ShortId;
 
 pub async fn read_one(
-    Path(id): Path<Uuid>,
+    Path(id): Path<ShortId>,
     repository: Extension<Repository>,
 ) -> Result<Json<projects::Project>, ApiError> {
     let project: projects::Project = repository
-        .read_one_project(dto::project::Field::all(), &id)
+        .read_one_project(dto::project::Field::all(), id.as_uuid())
         .await?
         .into();
     Ok(project.into())
@@ -37,7 +37,7 @@ pub async fn create(
     let project = repository
         .create_project(
             dto::project::Field::all(),
-            &request.account_id,
+            request.account_id.as_uuid(),
             &request.name,
         )
         .await?;
@@ -46,7 +46,7 @@ pub async fn create(
 }
 
 pub async fn update(
-    Path(id): Path<Uuid>,
+    Path(id): Path<ShortId>,
     repository: Extension<Repository>,
     request: Json<projects::Update>,
 ) -> Result<Json<projects::Project>, ApiError> {
@@ -55,16 +55,16 @@ pub async fn update(
         update_fields.push((dto::project::Field::Name, name.as_str().into()));
     }
     let (_, project) = repository
-        .update_project(&id, dto::project::Field::all(), update_fields)
+        .update_project(id.as_uuid(), dto::project::Field::all(), update_fields)
         .await?;
     let project: projects::Project = project.into();
     Ok(project.into())
 }
 
 pub async fn delete(
-    Path(id): Path<Uuid>,
+    Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.delete_project(&id).await?;
+    repository.delete_project(id.as_uuid()).await?;
     Ok(Empty::new())
 }

@@ -14,6 +14,7 @@ use crate::{
         queries::account::get_account_id,
         RepositoryError, Result,
     },
+    shortid::ShortId,
 };
 
 const ENTITY_PROJECT: &str = "project";
@@ -30,7 +31,7 @@ pub async fn get_project_id(pool: &DbPool, uuid: &Uuid) -> Result<i64> {
     } else {
         Err(RepositoryError::NotFound {
             entity_type: ENTITY_PROJECT.to_string(),
-            id: uuid.to_string()
+            id: ShortId::from_uuid(uuid).to_string(),
         })
     }
 }
@@ -50,7 +51,10 @@ pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &Uuid) -> Re
         .fetch_optional(pool)
         .await?
         .map(|row| from_row(&row, select_fields))
-        .ok_or_else(|| RepositoryError::NotFound {entity_type: ENTITY_PROJECT.to_string(), id: uuid.to_string()})?
+        .ok_or_else(|| RepositoryError::NotFound {
+            entity_type: ENTITY_PROJECT.to_string(),
+            id: ShortId::from_uuid(uuid).to_string(),
+        })?
 }
 
 pub async fn read_all(pool: &DbPool, select_fields: &[Field]) -> Result<Vec<Project>> {
@@ -119,7 +123,11 @@ pub async fn update(
             );
         }
         fields_to_update.push(']');
-        tracing::trace!(uuid = uuid.to_string(), fields = fields_to_update, "updating check");
+        tracing::trace!(
+            uuid = uuid.to_string(),
+            fields = fields_to_update,
+            "updating check"
+        );
     }
 
     let mut updated = false;
@@ -179,12 +187,14 @@ fn insert_statement(
 
     let now = Utc::now();
     let id = Uuid::new_v4();
+    let short_id: ShortId = id.into();
 
     statement
         .into_table(Field::Table)
         .columns([
             Field::AccountId,
             Field::Uuid,
+            Field::ShortId,
             Field::Name,
             Field::CreatedAt,
             Field::UpdatedAt,
@@ -192,6 +202,7 @@ fn insert_statement(
         .values(vec![
             account_id.into(),
             id.into(),
+            short_id.into(),
             name.into(),
             now.into(),
             now.into(),

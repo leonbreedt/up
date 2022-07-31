@@ -13,6 +13,7 @@ use crate::{
         queries::{account::get_account_id, project::get_project_id},
         RepositoryError, Result,
     },
+    shortid::ShortId,
 };
 
 const ENTITY_CHECK: &str = "check";
@@ -32,7 +33,10 @@ pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &Uuid) -> Re
         .fetch_optional(pool)
         .await?
         .map(|row| from_row(&row, select_fields))
-        .ok_or_else(|| RepositoryError::NotFound {entity_type: ENTITY_CHECK.to_string(), id: uuid.to_string()})?
+        .ok_or_else(|| RepositoryError::NotFound {
+            entity_type: ENTITY_CHECK.to_string(),
+            id: ShortId::from_uuid(uuid).to_string(),
+        })?
 }
 
 pub async fn read_all(pool: &DbPool, select_fields: &[Field]) -> Result<Vec<Check>> {
@@ -103,7 +107,11 @@ pub async fn update(
             );
         }
         fields_to_update.push(']');
-        tracing::trace!(uuid = uuid.to_string(), fields = fields_to_update, "updating check");
+        tracing::trace!(
+            uuid = uuid.to_string(),
+            fields = fields_to_update,
+            "updating check"
+        );
     }
 
     let mut updated = false;
@@ -164,6 +172,7 @@ fn insert_statement(
 
     let now = Utc::now();
     let id = Uuid::new_v4();
+    let short_id: ShortId = id.into();
 
     statement
         .into_table(Field::Table)
@@ -171,6 +180,7 @@ fn insert_statement(
             Field::AccountId,
             Field::ProjectId,
             Field::Uuid,
+            Field::ShortId,
             Field::Name,
             Field::CreatedAt,
             Field::UpdatedAt,
@@ -179,6 +189,7 @@ fn insert_statement(
             account_id.into(),
             project_id.into(),
             id.into(),
+            short_id.into(),
             name.into(),
             now.into(),
             now.into(),
