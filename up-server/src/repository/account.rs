@@ -5,6 +5,7 @@ use sea_query::{Expr, Iden, Query, SelectStatement};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::database::DbConnection;
 use crate::{
     database::{Database, DbQueryBuilder},
     repository::RepositoryError,
@@ -17,20 +18,22 @@ const ENTITY_ACCOUNT: &str = "account";
 
 #[derive(Clone)]
 pub struct AccountRepository {
-    database: Database,
+    _database: Database,
 }
 
 impl AccountRepository {
     pub fn new(database: Database) -> Self {
-        Self { database }
+        Self {
+            _database: database,
+        }
     }
 
-    pub async fn get_account_id(&self, uuid: &Uuid) -> Result<i64> {
+    pub async fn get_account_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
         let (sql, params) = queries::read_statement(&[Field::Id])
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .build(DbQueryBuilder::default());
         let row = bind_query(sqlx::query(&sql), &params)
-            .fetch_optional(self.database.pool())
+            .fetch_optional(&mut *conn)
             .await?;
         if let Some(row) = row {
             Ok(row.try_get("id")?)

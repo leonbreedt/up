@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::{bind_query, maybe_field_value, ModelField};
 use crate::{
-    database::{Database, DbPool, DbQueryBuilder, DbRow},
+    database::{Database, DbConnection, DbQueryBuilder, DbRow},
     repository::{account::AccountRepository, project::ProjectRepository, RepositoryError, Result},
     shortid::ShortId,
 };
@@ -34,11 +34,13 @@ impl CheckRepository {
     }
 
     pub async fn read_one_check(&self, select_fields: &[Field], uuid: &Uuid) -> Result<Check> {
-        queries::read_one(self.database.pool(), select_fields, uuid).await
+        let mut conn = self.database.connection().await?;
+        queries::read_one(&mut conn, select_fields, uuid).await
     }
 
     pub async fn read_checks(&self, select_fields: &[Field]) -> Result<Vec<Check>> {
-        queries::read_all(self.database.pool(), select_fields).await
+        let mut conn = self.database.connection().await?;
+        queries::read_all(&mut conn, select_fields).await
     }
 
     pub async fn create_check(
@@ -48,18 +50,15 @@ impl CheckRepository {
         project_uuid: &Uuid,
         name: &str,
     ) -> Result<Check> {
-        let account_id = self.account.get_account_id(account_uuid).await?;
-        let project_id = self.project.get_project_id(project_uuid).await?;
+        let mut tx = self.database.transaction().await?;
 
-        let check = queries::insert(
-            self.database.pool(),
-            select_fields,
-            account_id,
-            project_id,
-            name,
-        )
-        .await?;
+        let account_id = self.account.get_account_id(&mut tx, account_uuid).await?;
+        let project_id = self.project.get_project_id(&mut tx, project_uuid).await?;
+
+        let check = queries::insert(&mut tx, select_fields, account_id, project_id, name).await?;
         let uuid = check.uuid.as_ref().unwrap();
+
+        tx.commit().await?;
 
         tracing::trace!(
             account_uuid = account_uuid.to_string(),
@@ -77,8 +76,11 @@ impl CheckRepository {
         select_fields: &[Field],
         update_fields: Vec<(Field, sea_query::Value)>,
     ) -> Result<(bool, Check)> {
-        let (updated, check) =
-            queries::update(self.database.pool(), uuid, select_fields, update_fields).await?;
+        let mut tx = self.database.transaction().await?;
+
+        let (updated, check) = queries::update(&mut tx, uuid, select_fields, update_fields).await?;
+
+        tx.commit().await?;
 
         if updated {
             tracing::trace!(uuid = uuid.to_string(), "check updated");
@@ -90,7 +92,11 @@ impl CheckRepository {
     }
 
     pub async fn delete_check(&self, uuid: &Uuid) -> Result<bool> {
-        let deleted = queries::delete(self.database.pool(), uuid).await?;
+        let mut tx = self.database.transaction().await?;
+
+        let deleted = queries::delete(&mut tx, uuid).await?;
+
+        tx.commit().await?;
 
         if deleted {
             tracing::trace!(uuid = uuid.to_string(), "check deleted");
@@ -267,7 +273,11 @@ impl FromStr for Field {
 mod queries {
     use super::*;
 
-    pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &Uuid) -> Result<Check> {
+    pub async fn read_one(
+        conn: &mut DbConnection,
+        select_fields: &[Field],
+        uuid: &Uuid,
+    ) -> Result<Check> {
         tracing::trace!(
             select = format!("{:?}", select_fields),
             uuid = uuid.to_string(),
@@ -279,7 +289,7 @@ mod queries {
             .build(DbQueryBuilder::default());
 
         bind_query(sqlx::query(&sql), &params)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?
             .map(|row| from_row(&row, select_fields))
             .ok_or_else(|| RepositoryError::NotFound {
@@ -288,7 +298,7 @@ mod queries {
             })?
     }
 
-    pub async fn read_all(pool: &DbPool, select_fields: &[Field]) -> Result<Vec<Check>> {
+    pub async fn read_all(conn: &mut DbConnection, select_fields: &[Field]) -> Result<Vec<Check>> {
         tracing::trace!(
             select = format!("{:?}", select_fields),
             "reading all checks"
@@ -297,7 +307,7 @@ mod queries {
         let (sql, params) = read_statement(select_fields).build(DbQueryBuilder::default());
 
         bind_query(sqlx::query(&sql), &params)
-            .fetch_all(pool)
+            .fetch_all(&mut *conn)
             .await?
             .into_iter()
             .map(|row| from_row(&row, select_fields))
@@ -305,7 +315,7 @@ mod queries {
     }
 
     pub async fn insert(
-        pool: &DbPool,
+        conn: &mut DbConnection,
         select_fields: &[Field],
         account_id: i64,
         project_id: i64,
@@ -323,7 +333,7 @@ mod queries {
             .build(DbQueryBuilder::default());
 
         let row = bind_query(sqlx::query(&sql), &params)
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await?;
         let issue = from_row(&row, select_fields)?;
 
@@ -331,7 +341,7 @@ mod queries {
     }
 
     pub async fn update(
-        pool: &DbPool,
+        conn: &mut DbConnection,
         uuid: &Uuid,
         select_fields: &[Field],
         update_fields: Vec<(Field, sea_query::Value)>,
@@ -369,18 +379,18 @@ mod queries {
                 .build(query_builder);
 
             let rows_updated = bind_query(sqlx::query(&sql), &params)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await?
                 .rows_affected();
 
             updated = rows_updated > 0
         }
 
-        let check = read_one(pool, select_fields, uuid).await?;
+        let check = read_one(&mut *conn, select_fields, uuid).await?;
         Ok((updated, check))
     }
 
-    pub async fn delete(pool: &DbPool, uuid: &Uuid) -> Result<bool> {
+    pub async fn delete(conn: &mut DbConnection, uuid: &Uuid) -> Result<bool> {
         tracing::trace!(uuid = uuid.to_string(), "deleting check");
 
         let (sql, params) = update_statement(&[
@@ -391,7 +401,7 @@ mod queries {
         .build(DbQueryBuilder::default());
 
         let rows_deleted = bind_query(sqlx::query(&sql), &params)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?
             .rows_affected();
 

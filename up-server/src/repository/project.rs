@@ -10,9 +10,10 @@ use tracing::Level;
 use uuid::Uuid;
 
 use super::{bind_query, maybe_field_value};
+use crate::database::DbConnection;
 use crate::repository::account::AccountRepository;
 use crate::{
-    database::{Database, DbPool, DbQueryBuilder, DbRow},
+    database::{Database, DbQueryBuilder, DbRow},
     repository::{RepositoryError, Result},
     shortid::ShortId,
 };
@@ -32,12 +33,12 @@ impl ProjectRepository {
         Self { database, account }
     }
 
-    pub async fn get_project_id(&self, uuid: &Uuid) -> Result<i64> {
+    pub async fn get_project_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
         let (sql, params) = queries::read_statement(&[Field::Id])
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .build(DbQueryBuilder::default());
         let row = bind_query(sqlx::query(&sql), &params)
-            .fetch_optional(self.database.pool())
+            .fetch_optional(&mut *conn)
             .await?;
         if let Some(row) = row {
             Ok(row.try_get("id")?)
@@ -50,11 +51,13 @@ impl ProjectRepository {
     }
 
     pub async fn read_one_project(&self, select_fields: &[Field], uuid: &Uuid) -> Result<Project> {
-        queries::read_one(self.database.pool(), select_fields, uuid).await
+        let mut conn = self.database.connection().await?;
+        queries::read_one(&mut conn, select_fields, uuid).await
     }
 
     pub async fn read_projects(&self, select_fields: &[Field]) -> Result<Vec<Project>> {
-        queries::read_all(self.database.pool(), select_fields).await
+        let mut conn = self.database.connection().await?;
+        queries::read_all(&mut conn, select_fields).await
     }
 
     pub async fn create_project(
@@ -63,10 +66,13 @@ impl ProjectRepository {
         account_uuid: &Uuid,
         name: &str,
     ) -> Result<Project> {
-        let account_id = self.account.get_account_id(account_uuid).await?;
-        let project =
-            queries::insert(self.database.pool(), select_fields, account_id, name).await?;
+        let mut tx = self.database.transaction().await?;
+
+        let account_id = self.account.get_account_id(&mut tx, account_uuid).await?;
+        let project = queries::insert(&mut tx, select_fields, account_id, name).await?;
         let uuid = project.uuid.as_ref().unwrap();
+
+        tx.commit().await?;
 
         tracing::trace!(
             account_uuid = account_uuid.to_string(),
@@ -84,8 +90,11 @@ impl ProjectRepository {
         select_fields: &[Field],
         update_fields: Vec<(Field, sea_query::Value)>,
     ) -> Result<(bool, Project)> {
-        let (updated, check) =
-            queries::update(self.database.pool(), uuid, select_fields, update_fields).await?;
+        let mut tx = self.database.transaction().await?;
+
+        let (updated, check) = queries::update(&mut tx, uuid, select_fields, update_fields).await?;
+
+        tx.commit().await?;
 
         if updated {
             tracing::trace!(uuid = uuid.to_string(), "project updated");
@@ -97,7 +106,11 @@ impl ProjectRepository {
     }
 
     pub async fn delete_project(&self, uuid: &Uuid) -> Result<bool> {
-        let deleted = queries::delete(self.database.pool(), uuid).await?;
+        let mut tx = self.database.transaction().await?;
+
+        let deleted = queries::delete(&mut tx, uuid).await?;
+
+        tx.commit().await?;
 
         if deleted {
             tracing::trace!(uuid = uuid.to_string(), "project deleted");
@@ -194,8 +207,13 @@ impl FromStr for Field {
 
 mod queries {
     use super::*;
+    use crate::database::DbConnection;
 
-    pub async fn read_one(pool: &DbPool, select_fields: &[Field], uuid: &Uuid) -> Result<Project> {
+    pub async fn read_one(
+        conn: &mut DbConnection,
+        select_fields: &[Field],
+        uuid: &Uuid,
+    ) -> Result<Project> {
         tracing::trace!(
             select = format!("{:?}", select_fields),
             uuid = uuid.to_string(),
@@ -207,7 +225,7 @@ mod queries {
             .build(DbQueryBuilder::default());
 
         bind_query(sqlx::query(&sql), &params)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?
             .map(|row| from_row(&row, select_fields))
             .ok_or_else(|| RepositoryError::NotFound {
@@ -216,7 +234,10 @@ mod queries {
             })?
     }
 
-    pub async fn read_all(pool: &DbPool, select_fields: &[Field]) -> Result<Vec<Project>> {
+    pub async fn read_all(
+        conn: &mut DbConnection,
+        select_fields: &[Field],
+    ) -> Result<Vec<Project>> {
         tracing::trace!(
             select = format!("{:?}", select_fields),
             "reading all projects"
@@ -225,7 +246,7 @@ mod queries {
         let (sql, params) = read_statement(select_fields).build(DbQueryBuilder::default());
 
         bind_query(sqlx::query(&sql), &params)
-            .fetch_all(pool)
+            .fetch_all(&mut *conn)
             .await?
             .into_iter()
             .map(|row| from_row(&row, select_fields))
@@ -233,7 +254,7 @@ mod queries {
     }
 
     pub async fn insert(
-        pool: &DbPool,
+        conn: &mut DbConnection,
         select_fields: &[Field],
         account_id: i64,
         name: &str,
@@ -249,7 +270,7 @@ mod queries {
             insert_statement(select_fields, account_id, name)?.build(DbQueryBuilder::default());
 
         let row = bind_query(sqlx::query(&sql), &params)
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await?;
         let issue = from_row(&row, select_fields)?;
 
@@ -257,7 +278,7 @@ mod queries {
     }
 
     pub async fn update(
-        pool: &DbPool,
+        conn: &mut DbConnection,
         uuid: &Uuid,
         select_fields: &[Field],
         update_fields: Vec<(Field, sea_query::Value)>,
@@ -295,18 +316,18 @@ mod queries {
                 .build(query_builder);
 
             let rows_updated = bind_query(sqlx::query(&sql), &params)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await?
                 .rows_affected();
 
             updated = rows_updated > 0
         }
 
-        let check = read_one(pool, select_fields, uuid).await?;
+        let check = read_one(&mut *conn, select_fields, uuid).await?;
         Ok((updated, check))
     }
 
-    pub async fn delete(pool: &DbPool, uuid: &Uuid) -> Result<bool> {
+    pub async fn delete(conn: &mut DbConnection, uuid: &Uuid) -> Result<bool> {
         tracing::trace!(uuid = uuid.to_string(), "deleting project");
 
         let (sql, params) = update_statement(&[
@@ -317,7 +338,7 @@ mod queries {
         .build(DbQueryBuilder::default());
 
         let rows_deleted = bind_query(sqlx::query(&sql), &params)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?
             .rows_affected();
 

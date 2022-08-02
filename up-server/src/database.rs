@@ -1,23 +1,25 @@
 use std::time::Duration;
 
-use miette::{IntoDiagnostic, Result, WrapErr, Diagnostic};
-use sqlx::{migrate::Migrator, ConnectOptions};
-use tracing::log::LevelFilter;
+use miette::{Diagnostic, IntoDiagnostic, Result, WrapErr};
+use sqlx::{migrate::Migrator, pool::PoolConnection, ConnectOptions};
 use thiserror::Error;
+use tracing::log::LevelFilter;
 
+pub type DbType = sqlx::Postgres;
 pub type DbConnectOptions = sqlx::postgres::PgConnectOptions;
-pub type DbPool = sqlx::postgres::PgPool;
+pub type DbConnection = sqlx::postgres::PgConnection;
+pub type DbPoolConnection = PoolConnection<DbType>;
 pub type DbPoolOptions = sqlx::postgres::PgPoolOptions;
+pub type DbTransaction<'t> = sqlx::Transaction<'t, DbType>;
 pub type DbQueryBuilder = sea_query::PostgresQueryBuilder;
 pub type DbRow = sqlx::postgres::PgRow;
-pub type DbType = sqlx::Postgres;
 
 const SLOW_STATEMENT_THRESHOLD_MS: Duration = Duration::from_millis(100);
 static MIGRATOR: Migrator = sqlx::migrate!();
 
 #[derive(Clone)]
 pub struct Database {
-    pool: DbPool,
+    pool: sqlx::PgPool,
 }
 
 #[derive(Error, Diagnostic, Debug)]
@@ -27,12 +29,13 @@ pub enum DatabaseError {
     MalformedUrl(String, #[source] sqlx::Error),
     #[error("SQL error: {0}")]
     #[diagnostic(code(up::error::sql))]
-    GenericSqlError(#[from] sqlx::Error)
+    GenericSqlError(#[from] sqlx::Error),
 }
 
 impl Database {
     async fn new(url: &str, min_connections: u32, max_connections: u32) -> Result<Self> {
-        let mut connection_options: DbConnectOptions = url.parse()
+        let mut connection_options: DbConnectOptions = url
+            .parse()
             .map_err(|e| DatabaseError::MalformedUrl(url.to_string(), e))?;
 
         connection_options.log_statements(LevelFilter::Trace);
@@ -80,8 +83,12 @@ impl Database {
         result
     }
 
-    pub fn pool(&self) -> &DbPool {
-        &self.pool
+    pub async fn connection(&self) -> Result<DbPoolConnection, sqlx::Error> {
+        self.pool.acquire().await
+    }
+
+    pub async fn transaction(&self) -> Result<DbTransaction, sqlx::Error> {
+        self.pool.begin().await
     }
 }
 
