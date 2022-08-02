@@ -4,34 +4,28 @@ use axum::{
     http::{Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{self, get, patch, post},
-    Extension, Json, Router,
+    routing::get,
+    Extension, Router,
 };
 use hyper::{
     header::{CONTENT_LENGTH, CONTENT_TYPE},
     Body, Uri,
 };
+use miette::{Diagnostic, GraphicalReportHandler, JSONReportHandler, NarratableReportHandler};
 use serde_json::json;
 
-mod rest;
+mod json;
 mod ui;
+mod v1;
 
-use crate::{database::Database, repository::Repository};
+use crate::{api::json::Json, database::Database, repository::Repository};
 
+/// Builds a new router, providing handlers with a [`Repository`]
+/// connected to the specified [`Database`].
 pub fn build(database: Database) -> Router {
     let repository = Repository::new(database);
 
-    let router = Router::new()
-        .route("/api/checks", get(rest::checks::read_all))
-        .route("/api/checks", post(rest::checks::create))
-        .route("/api/checks/:id", get(rest::checks::read_one))
-        .route("/api/checks/:id", patch(rest::checks::update))
-        .route("/api/checks/:id", routing::delete(rest::checks::delete))
-        .route("/api/projects", get(rest::projects::read_all))
-        .route("/api/projects", post(rest::projects::create))
-        .route("/api/projects/:id", get(rest::projects::read_one))
-        .route("/api/projects/:id", patch(rest::projects::update))
-        .route("/api/projects/:id", routing::delete(rest::projects::delete))
+    let router = v1::router()
         .route("/", get(ui::index_handler))
         .layer(Extension(repository))
         .layer(middleware::from_fn(error_middleware))
@@ -40,6 +34,7 @@ pub fn build(database: Database) -> Router {
     ui::Asset::register_routes(router)
 }
 
+/// Fallback handler for non-matching routes.
 async fn not_found_handler(uri: Uri) -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
@@ -51,6 +46,9 @@ async fn not_found_handler(uri: Uri) -> impl IntoResponse {
     )
 }
 
+/// Error handling middleware that converts error responses (e.g. from extractors)
+/// into JSON responses if required. Ideally we should implement handling of all
+/// extractor rejections, but for now, we do it via a middleware.
 async fn error_middleware<B>(req: Request<B>, next: Next<B>) -> Response {
     let response = next.run(req).await;
     let (mut head, body) = response.into_parts();
@@ -89,4 +87,23 @@ async fn error_middleware<B>(req: Request<B>, next: Next<B>) -> Response {
     head.headers.insert(CONTENT_LENGTH, size.into());
 
     Response::from_parts(head, boxed(body))
+}
+
+pub(crate) enum ReportType {
+    Json,
+    Graphical,
+    Narratable,
+}
+
+/// Helper for easily rendering [`Diagnostic`] into different output formats.
+pub(crate) struct ReportRenderer<'e>(ReportType, &'e dyn Diagnostic);
+
+impl<'e> std::fmt::Display for ReportRenderer<'e> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self.0 {
+            ReportType::Json => JSONReportHandler::new().render_report(f, self.1),
+            ReportType::Graphical => GraphicalReportHandler::new().render_report(f, self.1),
+            ReportType::Narratable => NarratableReportHandler::new().render_report(f, self.1),
+        }
+    }
 }

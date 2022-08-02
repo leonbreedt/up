@@ -7,15 +7,18 @@ use axum::{
 };
 use rust_embed::RustEmbed;
 
+/// Handler for index.html requests.
 pub async fn index_handler() -> impl IntoResponse {
     static_file_handler("/index.html".parse::<Uri>().unwrap()).await
 }
 
+/// Generic handler for embedded static files.
 pub async fn static_file_handler(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/').to_string();
     StaticFile(path)
 }
 
+/// The `RustEmbed` asset containing the embedded resources.
 #[derive(RustEmbed)]
 #[folder = "../up-ui/out"]
 pub struct Asset;

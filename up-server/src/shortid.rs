@@ -46,7 +46,7 @@ impl From<Uuid> for ShortId {
 
 impl From<&Uuid> for ShortId {
     fn from(id: &Uuid) -> Self {
-        Self(id.clone())
+        Self(*id)
     }
 }
 
@@ -98,7 +98,7 @@ impl PartialEq for ShortId {
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum ParseShortIdError {
-    #[error("not a valid identifier")]
+    #[error("value could not be parsed as an identifier")]
     #[diagnostic(code(up::error::bad_argument))]
     DecodeFailure,
 }

@@ -173,6 +173,7 @@ fn insert_statement(
     let now = Utc::now();
     let id = Uuid::new_v4();
     let short_id: ShortId = id.into();
+    let ping_key = ShortId::new();
 
     statement
         .into_table(Field::Table)
@@ -181,6 +182,7 @@ fn insert_statement(
             Field::ProjectId,
             Field::Uuid,
             Field::ShortId,
+            Field::PingKey,
             Field::Name,
             Field::CreatedAt,
             Field::UpdatedAt,
@@ -190,6 +192,7 @@ fn insert_statement(
             project_id.into(),
             id.into(),
             short_id.into(),
+            ping_key.into(),
             name.into(),
             now.into(),
             now.into(),
