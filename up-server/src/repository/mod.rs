@@ -1,29 +1,47 @@
-use thiserror::Error;
+#![allow(clippy::manual_map)]
+sea_query::sea_query_driver_postgres!();
+
+pub use sea_query_driver_postgres::bind_query;
+
 use miette::Diagnostic;
-use uuid::Uuid;
+use sqlx::{Row, ValueRef};
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::str::FromStr;
+use thiserror::Error;
 
-use crate::database::Database;
+mod account;
+mod check;
+mod project;
 
-pub mod dto;
-mod queries;
+pub mod dto {
+    pub use super::check::{Check, CheckStatus, Field as CheckField, PeriodUnits, ScheduleType};
+    pub use super::project::{Field as ProjectField, Project};
+}
 
-use dto::{check, project};
+use account::AccountRepository;
+use check::CheckRepository;
+use project::ProjectRepository;
+
+use crate::database::{Database, DbRow, DbType};
 
 type Result<T> = miette::Result<T, RepositoryError>;
 
+/// Represents a field in a DTO (can be used in queries, parse from
+/// strings, converted to strings, and used as map keys).
+pub trait ModelField: Debug + Clone + Hash + PartialEq + Eq + FromStr + AsRef<str> {}
+
 #[derive(Clone)]
 pub struct Repository {
-    database: Database,
+    check: CheckRepository,
+    project: ProjectRepository,
 }
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum RepositoryError {
     #[error("{entity_type} does not exist")]
     #[diagnostic(code(up::error::bad_argument))]
-    NotFound {
-        entity_type: String,
-        id: String
-    },
+    NotFound { entity_type: String, id: String },
     #[error("SQL query failed")]
     #[diagnostic(code(up::error::sql))]
     SqlQueryFailed(#[from] sqlx::Error),
@@ -34,139 +52,39 @@ pub enum RepositoryError {
 
 impl Repository {
     pub fn new(database: Database) -> Self {
-        Self { database }
+        let account = AccountRepository::new(database.clone());
+        let project = ProjectRepository::new(database.clone(), account.clone());
+        let check = CheckRepository::new(database, account, project.clone());
+        Self { check, project }
     }
 
-    pub async fn read_one_check(
-        &self,
-        select_fields: &[check::Field],
-        uuid: &Uuid,
-    ) -> Result<check::Check> {
-        queries::check::read_one(self.database.pool(), select_fields, uuid).await
+    pub fn check(&self) -> &CheckRepository {
+        &self.check
     }
 
-    pub async fn read_checks(&self, select_fields: &[check::Field]) -> Result<Vec<check::Check>> {
-        queries::check::read_all(self.database.pool(), select_fields).await
+    pub fn project(&self) -> &ProjectRepository {
+        &self.project
     }
+}
 
-    pub async fn create_check(
-        &self,
-        select_fields: &[check::Field],
-        account_uuid: &Uuid,
-        project_uuid: &Uuid,
-        name: &str,
-    ) -> Result<check::Check> {
-        let check = queries::check::insert(
-            self.database.pool(),
-            select_fields,
-            account_uuid,
-            project_uuid,
-            name,
-        )
-        .await?;
-        let uuid = check.uuid.as_ref().unwrap();
-
-        tracing::trace!(
-            account_uuid = account_uuid.to_string(),
-            uuid = uuid.to_string(),
-            name = name,
-            "check created"
-        );
-
-        Ok(check)
-    }
-
-    pub async fn update_check(
-        &self,
-        uuid: &Uuid,
-        select_fields: &[check::Field],
-        update_fields: Vec<(check::Field, sea_query::Value)>,
-    ) -> Result<(bool, check::Check)> {
-        let (updated, check) =
-            queries::check::update(self.database.pool(), uuid, select_fields, update_fields)
-                .await?;
-
-        if updated {
-            tracing::trace!(uuid = uuid.to_string(), "check updated");
+pub(crate) fn maybe_field_value<'r, F, V>(
+    row: &'r DbRow,
+    selection: &[F],
+    field: &F,
+) -> Result<Option<V>>
+where
+    F: ModelField,
+    V: sqlx::Decode<'r, DbType> + sqlx::Type<DbType>,
+{
+    if selection.contains(field) {
+        let index = field.as_ref();
+        let value_ref = row.try_get_raw(index)?;
+        if value_ref.is_null() {
+            Ok(None)
         } else {
-            tracing::trace!(uuid = uuid.to_string(), "no change, check not updated");
+            Ok(Some(row.try_get(index)?))
         }
-
-        Ok((updated, check))
-    }
-
-    pub async fn delete_check(&self, uuid: &Uuid) -> Result<bool> {
-        let deleted = queries::check::delete(self.database.pool(), uuid).await?;
-
-        if deleted {
-            tracing::trace!(uuid = uuid.to_string(), "check deleted");
-        }
-
-        Ok(deleted)
-    }
-
-    pub async fn read_one_project(
-        &self,
-        select_fields: &[project::Field],
-        uuid: &Uuid,
-    ) -> Result<project::Project> {
-        queries::project::read_one(self.database.pool(), select_fields, uuid).await
-    }
-
-    pub async fn read_projects(
-        &self,
-        select_fields: &[project::Field],
-    ) -> Result<Vec<project::Project>> {
-        queries::project::read_all(self.database.pool(), select_fields).await
-    }
-
-    pub async fn create_project(
-        &self,
-        select_fields: &[project::Field],
-        account_uuid: &Uuid,
-        name: &str,
-    ) -> Result<project::Project> {
-        let project =
-            queries::project::insert(self.database.pool(), select_fields, account_uuid, name)
-                .await?;
-        let uuid = project.uuid.as_ref().unwrap();
-
-        tracing::trace!(
-            account_uuid = account_uuid.to_string(),
-            uuid = uuid.to_string(),
-            name = name,
-            "project created"
-        );
-
-        Ok(project)
-    }
-
-    pub async fn update_project(
-        &self,
-        uuid: &Uuid,
-        select_fields: &[project::Field],
-        update_fields: Vec<(project::Field, sea_query::Value)>,
-    ) -> Result<(bool, project::Project)> {
-        let (updated, check) =
-            queries::project::update(self.database.pool(), uuid, select_fields, update_fields)
-                .await?;
-
-        if updated {
-            tracing::trace!(uuid = uuid.to_string(), "project updated");
-        } else {
-            tracing::trace!(uuid = uuid.to_string(), "no change, project not updated");
-        }
-
-        Ok((updated, check))
-    }
-
-    pub async fn delete_project(&self, uuid: &Uuid) -> Result<bool> {
-        let deleted = queries::project::delete(self.database.pool(), uuid).await?;
-
-        if deleted {
-            tracing::trace!(uuid = uuid.to_string(), "project deleted");
-        }
-
-        Ok(deleted)
+    } else {
+        Ok(None)
     }
 }

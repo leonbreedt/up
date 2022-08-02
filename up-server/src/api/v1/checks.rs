@@ -1,14 +1,13 @@
-use axum::body::Empty;
-use axum::response::IntoResponse;
-use axum::{extract::Path, Extension};
+use axum::{body::Empty, extract::Path, response::IntoResponse, Extension};
 use chrono::{DateTime, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::api::v1::ApiError;
-use crate::api::Json;
-use crate::repository::{dto, Repository};
-use crate::shortid::ShortId;
+use crate::{
+    api::{v1::ApiError, Json},
+    repository::{dto, Repository},
+    shortid::ShortId,
+};
 
 /// Handler for `GET /api/v1/checks/:id`
 pub async fn read_one(
@@ -16,7 +15,8 @@ pub async fn read_one(
     repository: Extension<Repository>,
 ) -> Result<Json<Check>, ApiError> {
     let check: Check = repository
-        .read_one_check(dto::check::Field::all(), id.as_uuid())
+        .check()
+        .read_one_check(dto::CheckField::all(), id.as_uuid())
         .await?
         .into();
     Ok(check.into())
@@ -27,7 +27,8 @@ pub async fn read_all(
     Extension(repository): Extension<Repository>,
 ) -> Result<Json<Vec<Check>>, ApiError> {
     let checks: Vec<Check> = repository
-        .read_checks(dto::check::Field::all())
+        .check()
+        .read_checks(dto::CheckField::all())
         .await?
         .into_iter()
         .map(|i| i.into())
@@ -41,8 +42,9 @@ pub async fn create(
     request: Json<CreateCheck>,
 ) -> Result<Json<Check>, ApiError> {
     let check = repository
+        .check()
         .create_check(
-            dto::check::Field::all(),
+            dto::CheckField::all(),
             request.account_id.as_uuid(),
             request.project_id.as_uuid(),
             &request.name,
@@ -60,10 +62,11 @@ pub async fn update(
 ) -> Result<Json<Check>, ApiError> {
     let mut update_fields = Vec::new();
     if let Some(name) = &request.name {
-        update_fields.push((dto::check::Field::Name, name.as_str().into()));
+        update_fields.push((dto::CheckField::Name, name.as_str().into()));
     }
     let (_, check) = repository
-        .update_check(id.as_uuid(), dto::check::Field::all(), update_fields)
+        .check()
+        .update_check(id.as_uuid(), dto::CheckField::all(), update_fields)
         .await?;
     let check: Check = check.into();
     Ok(check.into())
@@ -74,7 +77,7 @@ pub async fn delete(
     Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.delete_check(id.as_uuid()).await?;
+    repository.check().delete_check(id.as_uuid()).await?;
     Ok(Empty::new())
 }
 
@@ -147,8 +150,8 @@ pub struct Check {
 
 /// Conversion from repository [`dto::check::Check`] to
 /// API [`Check`].
-impl From<dto::check::Check> for Check {
-    fn from(issue: dto::check::Check) -> Self {
+impl From<dto::Check> for Check {
+    fn from(issue: dto::Check) -> Self {
         Self {
             id: issue.uuid.unwrap().into(),
             name: issue.name.unwrap(),
@@ -169,35 +172,35 @@ impl From<dto::check::Check> for Check {
 
 /// Conversion from repository [`dto::check::CheckStatus`] to
 /// API [`CheckStatus`].
-impl From<dto::check::CheckStatus> for CheckStatus {
-    fn from(status: dto::check::CheckStatus) -> Self {
+impl From<dto::CheckStatus> for CheckStatus {
+    fn from(status: dto::CheckStatus) -> Self {
         match status {
-            dto::check::CheckStatus::Up => CheckStatus::Up,
-            dto::check::CheckStatus::Down => CheckStatus::Down,
-            dto::check::CheckStatus::Created => CheckStatus::Created,
+            dto::CheckStatus::Up => CheckStatus::Up,
+            dto::CheckStatus::Down => CheckStatus::Down,
+            dto::CheckStatus::Created => CheckStatus::Created,
         }
     }
 }
 
 /// Conversion from repository [`dto::check::ScheduleType`] to
 /// API [`ScheduleType`].
-impl From<dto::check::ScheduleType> for ScheduleType {
-    fn from(status: dto::check::ScheduleType) -> Self {
+impl From<dto::ScheduleType> for ScheduleType {
+    fn from(status: dto::ScheduleType) -> Self {
         match status {
-            dto::check::ScheduleType::Simple => ScheduleType::Simple,
-            dto::check::ScheduleType::Cron => ScheduleType::Cron,
+            dto::ScheduleType::Simple => ScheduleType::Simple,
+            dto::ScheduleType::Cron => ScheduleType::Cron,
         }
     }
 }
 
 /// Conversion from repository [`dto::check::PeriodUnits`] to
 /// API [`PeriodUnits`].
-impl From<dto::check::PeriodUnits> for PeriodUnits {
-    fn from(status: dto::check::PeriodUnits) -> Self {
+impl From<dto::PeriodUnits> for PeriodUnits {
+    fn from(status: dto::PeriodUnits) -> Self {
         match status {
-            dto::check::PeriodUnits::Minutes => PeriodUnits::Minutes,
-            dto::check::PeriodUnits::Hours => PeriodUnits::Hours,
-            dto::check::PeriodUnits::Days => PeriodUnits::Days,
+            dto::PeriodUnits::Minutes => PeriodUnits::Minutes,
+            dto::PeriodUnits::Hours => PeriodUnits::Hours,
+            dto::PeriodUnits::Days => PeriodUnits::Days,
         }
     }
 }

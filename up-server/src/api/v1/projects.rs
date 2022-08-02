@@ -5,10 +5,11 @@ use chrono::{DateTime, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::api::v1::ApiError;
-use crate::api::Json;
-use crate::repository::{dto, Repository};
-use crate::shortid::ShortId;
+use crate::{
+    api::{v1::ApiError, Json},
+    repository::{dto, Repository},
+    shortid::ShortId,
+};
 
 /// Handler for `GET /api/v1/projects/:id`
 pub async fn read_one(
@@ -16,7 +17,8 @@ pub async fn read_one(
     repository: Extension<Repository>,
 ) -> Result<Json<Project>, ApiError> {
     let project: Project = repository
-        .read_one_project(dto::project::Field::all(), id.as_uuid())
+        .project()
+        .read_one_project(dto::ProjectField::all(), id.as_uuid())
         .await?
         .into();
     Ok(project.into())
@@ -27,7 +29,8 @@ pub async fn read_all(
     Extension(repository): Extension<Repository>,
 ) -> Result<Json<Vec<Project>>, ApiError> {
     let projects: Vec<Project> = repository
-        .read_projects(dto::project::Field::all())
+        .project()
+        .read_projects(dto::ProjectField::all())
         .await?
         .into_iter()
         .map(|i| i.into())
@@ -41,8 +44,9 @@ pub async fn create(
     request: Json<CreateProject>,
 ) -> Result<Json<Project>, ApiError> {
     let project = repository
+        .project()
         .create_project(
-            dto::project::Field::all(),
+            dto::ProjectField::all(),
             request.account_id.as_uuid(),
             &request.name,
         )
@@ -59,10 +63,11 @@ pub async fn update(
 ) -> Result<Json<Project>, ApiError> {
     let mut update_fields = Vec::new();
     if let Some(name) = &request.name {
-        update_fields.push((dto::project::Field::Name, name.as_str().into()));
+        update_fields.push((dto::ProjectField::Name, name.as_str().into()));
     }
     let (_, project) = repository
-        .update_project(id.as_uuid(), dto::project::Field::all(), update_fields)
+        .project()
+        .update_project(id.as_uuid(), dto::ProjectField::all(), update_fields)
         .await?;
     let project: Project = project.into();
     Ok(project.into())
@@ -73,14 +78,14 @@ pub async fn delete(
     Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.delete_project(id.as_uuid()).await?;
+    repository.project().delete_project(id.as_uuid()).await?;
     Ok(Empty::new())
 }
 
 /// Conversion from repository [`dto::project::Project`] to
 /// API [`Project`].
-impl From<dto::project::Project> for Project {
-    fn from(issue: dto::project::Project) -> Self {
+impl From<dto::Project> for Project {
+    fn from(issue: dto::Project) -> Self {
         Self {
             id: issue.uuid.unwrap().into(),
             name: issue.name.unwrap(),

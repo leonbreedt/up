@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS projects (
     CONSTRAINT  projects_unique_shortid UNIQUE (shortid)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS projects_unique_name_account_id
+    ON projects (name, account_id)
+    WHERE deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS user_projects (
     user_id    BIGINT NOT NULL REFERENCES users (id),
     project_id BIGINT NOT NULL REFERENCES projects (id),
