@@ -96,7 +96,7 @@ pub(crate) enum ReportType {
 }
 
 /// Helper for easily rendering [`Diagnostic`] into different output formats.
-pub(crate) struct ReportRenderer<'e>(ReportType, &'e dyn Diagnostic);
+pub(crate) struct ReportRenderer<'e>(pub ReportType, pub &'e dyn Diagnostic);
 
 impl<'e> std::fmt::Display for ReportRenderer<'e> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

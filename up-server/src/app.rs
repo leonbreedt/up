@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use miette::{IntoDiagnostic, Result};
 use argh::FromArgs;
+use miette::{IntoDiagnostic, Result};
 use tracing_subscriber::EnvFilter;
 
 use crate::{api, database};
@@ -70,12 +70,23 @@ impl App {
             "server started"
         );
 
-        axum::Server::bind(&self.args.listen_address)
-            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
-            .await.into_diagnostic()?;
+        let server = axum::Server::bind(&self.args.listen_address)
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>());
+
+        let graceful = server.with_graceful_shutdown(shutdown_signal());
+
+        graceful.await.into_diagnostic()?;
+
+        tracing::debug!("server terminated");
 
         Ok(())
     }
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to handle Ctrl-C signal")
 }
 
 #[derive(FromArgs)]
