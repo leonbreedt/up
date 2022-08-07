@@ -44,6 +44,11 @@ impl CheckRepository {
         queries::read_all(&mut conn, select_fields).await
     }
 
+    pub async fn read_overdue_checks(&self) -> Result<Vec<Check>> {
+        let mut conn = self.database.connection().await?;
+        queries::read_overdue(&mut conn).await
+    }
+
     pub async fn create_check(
         &self,
         select_fields: &[Field],
@@ -298,6 +303,7 @@ impl FromStr for Field {
 
 mod queries {
     use super::*;
+    use crate::repository::dto::CheckField;
     use sea_query::Alias;
 
     pub async fn read_one(
@@ -364,6 +370,30 @@ mod queries {
             .await?
             .into_iter()
             .map(|row| from_row(&row, select_fields))
+            .collect()
+    }
+
+    pub async fn read_overdue(conn: &mut DbConnection) -> Result<Vec<Check>> {
+        tracing::trace!("reading overdue checks");
+
+        let selected_fields = CheckField::all();
+
+        let (sql, params) = read_statement(selected_fields)
+            .and_where(
+                Expr::col(Field::Status)
+                    .as_enum(Alias::new("check_status"))
+                    .not_equals(
+                        Expr::value(CheckStatus::Created.to_string())
+                            .cast_as(Alias::new("check_status")),
+                    ),
+            )
+            .build(DbQueryBuilder::default());
+
+        bind_query(sqlx::query(&sql), &params)
+            .fetch_all(&mut *conn)
+            .await?
+            .into_iter()
+            .map(|row| from_row(&row, selected_fields))
             .collect()
     }
 

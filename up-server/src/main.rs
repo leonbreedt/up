@@ -3,7 +3,9 @@ use miette::Result;
 mod api;
 mod app;
 mod database;
+mod jobs;
 mod mask;
+mod notifier;
 mod repository;
 mod shortid;
 

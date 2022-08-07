@@ -18,16 +18,16 @@ mod json;
 mod ui;
 mod v1;
 
+use crate::notifier::Notifier;
 use crate::{api::json::Json, database::Database, repository::Repository};
 
 /// Builds a new router, providing handlers with a [`Repository`]
 /// connected to the specified [`Database`].
-pub fn build(database: Database) -> Router {
-    let repository = Repository::new(database);
-
+pub fn build(repository: Repository, notifier: Notifier) -> Router {
     let router = v1::router()
         .route("/", get(ui::index_handler))
         .layer(Extension(repository))
+        .layer(Extension(notifier))
         .layer(middleware::from_fn(error_middleware))
         .fallback(not_found_handler.into_service());
 

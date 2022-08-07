@@ -5,7 +5,10 @@ use argh::FromArgs;
 use miette::{IntoDiagnostic, Result};
 use tracing_subscriber::EnvFilter;
 
-use crate::{api, database};
+use crate::jobs::PollChecks;
+use crate::notifier::Notifier;
+use crate::repository::Repository;
+use crate::{api, database, jobs};
 
 static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 
@@ -57,7 +60,12 @@ impl App {
 
         database.migrate().await?;
 
-        let router = api::build(database);
+        let repository = Repository::new(database.clone());
+
+        let notifier = Notifier::with_repository(repository.clone());
+        let mut poll_checks_job = jobs::PollChecks::with_repository(repository.clone());
+
+        let router = api::build(repository, notifier);
 
         tracing::debug!(
             ip = self.args.listen_address.ip().to_string().as_str(),
@@ -70,11 +78,12 @@ impl App {
             "server started"
         );
 
+        poll_checks_job.spawn().await;
+
         let server = axum::Server::bind(&self.args.listen_address)
             .serve(router.into_make_service_with_connect_info::<SocketAddr>());
 
-        let graceful = server.with_graceful_shutdown(shutdown_signal());
-
+        let graceful = server.with_graceful_shutdown(shutdown_signal(&mut poll_checks_job));
         graceful.await.into_diagnostic()?;
 
         tracing::debug!("server terminated");
@@ -83,10 +92,12 @@ impl App {
     }
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(poll_checks_job: &mut PollChecks) {
     tokio::signal::ctrl_c()
         .await
-        .expect("failed to handle Ctrl-C signal")
+        .expect("failed to handle Ctrl-C signal");
+    tracing::info!("ctrl-c received");
+    poll_checks_job.stop().await;
 }
 
 #[derive(FromArgs)]
