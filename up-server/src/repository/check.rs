@@ -8,7 +8,7 @@ use sea_query::{
 use tracing::Level;
 use uuid::Uuid;
 
-use super::{bind_query, maybe_field_value, ModelField};
+use super::{bind_query, bind_query_as, maybe_field_value, ModelField};
 use crate::{
     database::{Database, DbConnection, DbQueryBuilder, DbRow},
     mask,
@@ -109,9 +109,8 @@ impl CheckRepository {
     pub async fn ping_check(&self, key: &str) -> Result<bool> {
         let mut tx = self.database.transaction().await?;
 
-        let check = queries::read_check_by_ping_key(&mut tx, &[Field::Uuid], key).await?;
-        if let Some(uuid) = check.uuid {
-            let rows_affected = queries::ping(&mut tx, &uuid).await?;
+        if let Some(id) = queries::read_check_id_for_ping_key(&mut tx, key).await? {
+            let rows_affected = queries::ping(&mut tx, id).await?;
 
             tx.commit().await?;
 
@@ -325,28 +324,30 @@ mod queries {
             })?
     }
 
-    pub async fn read_check_by_ping_key(
+    pub async fn read_check_id_for_ping_key(
         conn: &mut DbConnection,
-        select_fields: &[Field],
         ping_key: &str,
-    ) -> Result<Check> {
+    ) -> Result<Option<i64>> {
         tracing::trace!(
-            select = format!("{:?}", select_fields),
             ping_key = mask::ping_key(ping_key),
-            "reading check by ping key"
+            "reading check ID for ping key"
         );
 
-        let (sql, params) = read_statement(select_fields)
+        let (sql, params) = Query::select()
+            .from(Field::Table)
+            .columns(vec![Field::Id])
             .and_where(Expr::col(Field::PingKey).eq(ping_key))
+            .and_where(Expr::col(Field::Deleted).eq(false))
             .build(DbQueryBuilder::default());
 
-        bind_query(sqlx::query(&sql), &params)
+        let result: (Option<i64>,) = bind_query_as(sqlx::query_as(&sql), &params)
             .fetch_optional(&mut *conn)
             .await?
-            .map(|row| from_row(&row, select_fields))
             .ok_or_else(|| RepositoryError::NotFoundPingKey {
                 key: ping_key.to_string(),
-            })?
+            })?;
+
+        Ok(result.0)
     }
 
     pub async fn read_all(conn: &mut DbConnection, select_fields: &[Field]) -> Result<Vec<Check>> {
@@ -391,7 +392,7 @@ mod queries {
         Ok(issue)
     }
 
-    pub async fn ping(conn: &mut DbConnection, uuid: &Uuid) -> Result<u64> {
+    pub async fn ping(conn: &mut DbConnection, id: i64) -> Result<u64> {
         let (sql, params) = Query::update()
             .table(Field::Table)
             .value(Field::LastPingAt, Utc::now().into())
@@ -399,7 +400,7 @@ mod queries {
                 Field::Status,
                 Expr::val(CheckStatus::Up.to_string()).as_enum(Alias::new("check_status")),
             )
-            .and_where(Expr::col(Field::Uuid).eq(*uuid))
+            .and_where(Expr::col(Field::Id).eq(id))
             .and_where(Expr::col(Field::Deleted).eq(false))
             .build(DbQueryBuilder::default());
 

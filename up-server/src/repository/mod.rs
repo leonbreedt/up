@@ -1,7 +1,7 @@
 #![allow(clippy::manual_map)]
 sea_query::sea_query_driver_postgres!();
 
-pub use sea_query_driver_postgres::bind_query;
+pub use sea_query_driver_postgres::{bind_query, bind_query_as};
 
 use miette::Diagnostic;
 use sqlx::{Row, ValueRef};
