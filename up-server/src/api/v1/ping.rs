@@ -1,24 +1,38 @@
-use axum::extract::Path;
-use axum::response::IntoResponse;
-use axum::Extension;
+use std::net::SocketAddr;
+
+use axum::{
+    extract::{ConnectInfo, Path, TypedHeader},
+    headers::UserAgent,
+    response::IntoResponse,
+    Extension,
+};
 
 use crate::{
     api::v1::ApiError,
     mask,
     repository::{Repository, RepositoryError},
+    shortid::ShortId,
 };
 
 pub async fn ping(
     Path(key): Path<String>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+    TypedHeader(user_agent): TypedHeader<UserAgent>,
     repository: Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
     match repository.check().ping_check(key.as_str()).await {
-        Ok(found) => {
-            if found {
-                tracing::debug!(key = mask::ping_key(key.as_str()), "ping received");
-            } else {
-                tracing::trace!(key = key, "ignoring ping received, unknown key")
-            }
+        Ok(Some(uuid)) => {
+            tracing::debug!(
+                remote_ip = remote_addr.ip().to_string().as_str(),
+                remote_port = remote_addr.port(),
+                user_agent = user_agent.as_str(),
+                id = ShortId::from(uuid).to_string(),
+                key = mask::ping_key(key.as_str()),
+                "ping received"
+            );
+        }
+        Ok(None) => {
+            tracing::trace!(key = key, "ignoring ping received, unknown key")
         }
         Err(RepositoryError::NotFoundPingKey { key: _key }) => {
             tracing::trace!("ignoring ping key not found")

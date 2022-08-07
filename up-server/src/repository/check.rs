@@ -106,17 +106,18 @@ impl CheckRepository {
         Ok(deleted)
     }
 
-    pub async fn ping_check(&self, key: &str) -> Result<bool> {
+    pub async fn ping_check(&self, key: &str) -> Result<Option<Uuid>> {
         let mut tx = self.database.transaction().await?;
 
-        if let Some(id) = queries::read_check_id_for_ping_key(&mut tx, key).await? {
-            let rows_affected = queries::ping(&mut tx, id).await?;
+        let (id, uuid) = queries::read_check_id_for_ping_key(&mut tx, key).await?;
+        let rows_affected = queries::ping(&mut tx, id).await?;
 
-            tx.commit().await?;
+        tx.commit().await?;
 
-            Ok(rows_affected > 0)
+        if rows_affected > 0 {
+            Ok(Some(uuid))
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 }
@@ -327,27 +328,27 @@ mod queries {
     pub async fn read_check_id_for_ping_key(
         conn: &mut DbConnection,
         ping_key: &str,
-    ) -> Result<Option<i64>> {
+    ) -> Result<(i64, Uuid)> {
         tracing::trace!(
             ping_key = mask::ping_key(ping_key),
-            "reading check ID for ping key"
+            "reading check IDs for ping key"
         );
 
         let (sql, params) = Query::select()
             .from(Field::Table)
-            .columns(vec![Field::Id])
+            .columns(vec![Field::Id, Field::Uuid])
             .and_where(Expr::col(Field::PingKey).eq(ping_key))
             .and_where(Expr::col(Field::Deleted).eq(false))
             .build(DbQueryBuilder::default());
 
-        let result: (Option<i64>,) = bind_query_as(sqlx::query_as(&sql), &params)
+        let result: (i64, Uuid) = bind_query_as(sqlx::query_as(&sql), &params)
             .fetch_optional(&mut *conn)
             .await?
             .ok_or_else(|| RepositoryError::NotFoundPingKey {
                 key: ping_key.to_string(),
             })?;
 
-        Ok(result.0)
+        Ok(result)
     }
 
     pub async fn read_all(conn: &mut DbConnection, select_fields: &[Field]) -> Result<Vec<Check>> {
