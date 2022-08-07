@@ -42,6 +42,9 @@ pub enum RepositoryError {
     #[error("{entity_type} does not exist")]
     #[diagnostic(code(up::error::bad_argument))]
     NotFound { entity_type: String, id: String },
+    #[error("check with ping key '{key}' does not exist")]
+    #[diagnostic(code(up::error::bad_argument))]
+    NotFoundPingKey { key: String },
     #[error("SQL query failed")]
     #[diagnostic(code(up::error::sql))]
     SqlQueryFailed(#[from] sqlx::Error),

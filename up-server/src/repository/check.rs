@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::{bind_query, maybe_field_value, ModelField};
 use crate::{
     database::{Database, DbConnection, DbQueryBuilder, DbRow},
+    mask,
     repository::{account::AccountRepository, project::ProjectRepository, RepositoryError, Result},
     shortid::ShortId,
 };
@@ -104,6 +105,21 @@ impl CheckRepository {
 
         Ok(deleted)
     }
+
+    pub async fn ping_check(&self, key: &str) -> Result<bool> {
+        let mut tx = self.database.transaction().await?;
+
+        let check = queries::read_check_by_ping_key(&mut tx, &[Field::Uuid], key).await?;
+        if let Some(uuid) = check.uuid {
+            let rows_affected = queries::ping(&mut tx, &uuid).await?;
+
+            tx.commit().await?;
+
+            Ok(rows_affected > 0)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[derive(sqlx::Type)]
@@ -119,6 +135,16 @@ pub enum CheckStatus {
     Up,
     Down,
     Created,
+}
+
+impl ToString for CheckStatus {
+    fn to_string(&self) -> String {
+        match self {
+            CheckStatus::Up => "UP".to_string(),
+            CheckStatus::Down => "DOWN".to_string(),
+            CheckStatus::Created => "CREATED".to_string(),
+        }
+    }
 }
 
 #[derive(sqlx::Type)]
@@ -272,6 +298,7 @@ impl FromStr for Field {
 
 mod queries {
     use super::*;
+    use sea_query::Alias;
 
     pub async fn read_one(
         conn: &mut DbConnection,
@@ -295,6 +322,30 @@ mod queries {
             .ok_or_else(|| RepositoryError::NotFound {
                 entity_type: ENTITY_CHECK.to_string(),
                 id: ShortId::from_uuid(uuid).to_string(),
+            })?
+    }
+
+    pub async fn read_check_by_ping_key(
+        conn: &mut DbConnection,
+        select_fields: &[Field],
+        ping_key: &str,
+    ) -> Result<Check> {
+        tracing::trace!(
+            select = format!("{:?}", select_fields),
+            ping_key = mask::ping_key(ping_key),
+            "reading check by ping key"
+        );
+
+        let (sql, params) = read_statement(select_fields)
+            .and_where(Expr::col(Field::PingKey).eq(ping_key))
+            .build(DbQueryBuilder::default());
+
+        bind_query(sqlx::query(&sql), &params)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| from_row(&row, select_fields))
+            .ok_or_else(|| RepositoryError::NotFoundPingKey {
+                key: ping_key.to_string(),
             })?
     }
 
@@ -338,6 +389,26 @@ mod queries {
         let issue = from_row(&row, select_fields)?;
 
         Ok(issue)
+    }
+
+    pub async fn ping(conn: &mut DbConnection, uuid: &Uuid) -> Result<u64> {
+        let (sql, params) = Query::update()
+            .table(Field::Table)
+            .value(Field::LastPingAt, Utc::now().into())
+            .value_expr(
+                Field::Status,
+                Expr::val(CheckStatus::Up.to_string()).as_enum(Alias::new("check_status")),
+            )
+            .and_where(Expr::col(Field::Uuid).eq(*uuid))
+            .and_where(Expr::col(Field::Deleted).eq(false))
+            .build(DbQueryBuilder::default());
+
+        let rows_updated = bind_query(sqlx::query(&sql), &params)
+            .execute(&mut *conn)
+            .await?
+            .rows_affected();
+
+        Ok(rows_updated)
     }
 
     pub async fn update(

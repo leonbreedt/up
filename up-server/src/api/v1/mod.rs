@@ -13,6 +13,7 @@ use crate::repository::RepositoryError;
 use super::{ReportRenderer, ReportType};
 
 pub mod checks;
+pub mod ping;
 pub mod projects;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -34,6 +35,7 @@ pub fn router() -> Router {
         .route("/api/v1/projects/:id", get(projects::read_one))
         .route("/api/v1/projects/:id", patch(projects::update))
         .route("/api/v1/projects/:id", delete(projects::delete))
+        .route("/api/v1/ping/:key", post(ping::ping))
 }
 
 impl IntoResponse for ApiError {
