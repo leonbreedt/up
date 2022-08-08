@@ -19,7 +19,7 @@ mod ui;
 mod v1;
 
 use crate::notifier::Notifier;
-use crate::{api::json::Json, database::Database, repository::Repository};
+use crate::{api::json::Json, repository::Repository};
 
 /// Builds a new router, providing handlers with a [`Repository`]
 /// connected to the specified [`Database`].

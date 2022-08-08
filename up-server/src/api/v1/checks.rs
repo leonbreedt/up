@@ -1,5 +1,5 @@
 use axum::{body::Empty, extract::Path, response::IntoResponse, Extension};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
@@ -14,11 +14,7 @@ pub async fn read_one(
     Path(id): Path<ShortId>,
     repository: Extension<Repository>,
 ) -> Result<Json<Check>, ApiError> {
-    let check: Check = repository
-        .check()
-        .read_one_check(dto::CheckField::all(), id.as_uuid())
-        .await?
-        .into();
+    let check: Check = repository.check().read_one(id.as_uuid()).await?.into();
     Ok(check.into())
 }
 
@@ -28,7 +24,7 @@ pub async fn read_all(
 ) -> Result<Json<Vec<Check>>, ApiError> {
     let checks: Vec<Check> = repository
         .check()
-        .read_checks(dto::CheckField::all())
+        .read_all()
         .await?
         .into_iter()
         .map(|i| i.into())
@@ -43,8 +39,7 @@ pub async fn create(
 ) -> Result<Json<Check>, ApiError> {
     let check = repository
         .check()
-        .create_check(
-            dto::CheckField::all(),
+        .create(
             request.account_id.as_uuid(),
             request.project_id.as_uuid(),
             &request.name,
@@ -66,7 +61,7 @@ pub async fn update(
     }
     let (_, check) = repository
         .check()
-        .update_check(id.as_uuid(), dto::CheckField::all(), update_fields)
+        .update(id.as_uuid(), update_fields)
         .await?;
     let check: Check = check.into();
     Ok(check.into())
@@ -77,7 +72,7 @@ pub async fn delete(
     Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.check().delete_check(id.as_uuid()).await?;
+    repository.check().delete(id.as_uuid()).await?;
     Ok(Empty::new())
 }
 
@@ -127,20 +122,15 @@ pub enum PeriodUnits {
 pub struct Check {
     pub id: ShortId,
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    pub description: String,
     pub status: CheckStatus,
     pub schedule_type: ScheduleType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ping_period: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ping_period_units: Option<PeriodUnits>,
+    pub ping_period: i32,
+    pub ping_period_units: PeriodUnits,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ping_cron_expression: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub grace_period: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub grace_period_units: Option<PeriodUnits>,
+    pub grace_period: i32,
+    pub grace_period_units: PeriodUnits,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_ping_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -153,19 +143,19 @@ pub struct Check {
 impl From<dto::Check> for Check {
     fn from(issue: dto::Check) -> Self {
         Self {
-            id: issue.uuid.unwrap().into(),
-            name: issue.name.unwrap(),
+            id: issue.uuid.into(),
+            name: issue.name,
             description: issue.description,
-            status: issue.status.unwrap().into(),
-            schedule_type: issue.schedule_type.unwrap().into(),
+            status: issue.status.into(),
+            schedule_type: issue.schedule_type.into(),
             ping_period: issue.ping_period,
-            ping_period_units: issue.ping_period_units.map(|u| u.into()),
+            ping_period_units: issue.ping_period_units.into(),
             ping_cron_expression: issue.ping_cron_expression,
             grace_period: issue.grace_period,
-            grace_period_units: issue.grace_period_units.map(|u| u.into()),
-            last_ping_at: issue.last_ping_at,
-            created_at: issue.created_at.unwrap(),
-            updated_at: issue.updated_at,
+            grace_period_units: issue.grace_period_units.into(),
+            last_ping_at: issue.last_ping_at.map(|d| Utc.from_utc_datetime(&d)),
+            created_at: Utc.from_utc_datetime(&issue.created_at),
+            updated_at: issue.updated_at.map(|d| Utc.from_utc_datetime(&d)),
         }
     }
 }

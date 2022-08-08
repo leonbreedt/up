@@ -21,10 +21,10 @@ impl Notifier {
     }
 
     pub fn send_email(
-        address: String,
-        subject: String,
-        textBody: String,
-        htmlBody: String,
+        _address: String,
+        _subject: String,
+        _text_body: String,
+        _html_body: String,
     ) -> Result<()> {
         Ok(())
     }

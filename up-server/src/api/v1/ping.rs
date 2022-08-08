@@ -20,7 +20,7 @@ pub async fn ping(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     repository: Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    match repository.check().ping_check(key.as_str()).await {
+    match repository.check().ping(key.as_str()).await {
         Ok(Some(uuid)) => {
             tracing::debug!(
                 remote_ip = remote_addr.ip().to_string().as_str(),

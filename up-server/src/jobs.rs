@@ -1,9 +1,7 @@
 use std::time::Duration;
 use tokio::{sync::oneshot, task::JoinHandle, time};
 
-use crate::database::Database;
-use crate::repository::dto::Check;
-use crate::repository::{dto, Repository};
+use crate::repository::Repository;
 
 const POLL_INTERVAL: u64 = 5;
 
@@ -33,13 +31,16 @@ impl PollChecks {
                 tokio::select! {
                     _ = poll_interval.tick() => {
                         tracing::info!("polling for check statuses");
-                        if let Ok(checks) = task_repository.check().read_overdue_checks().await {
+                        match task_repository.check().read_overdue().await {
+                            Ok(checks) => {
                             for check in checks {
-                                tracing::info!("overdue: {:?} (status={}, last_pinged_at={:?})", check.uuid.unwrap(), check.status.unwrap().to_string(), check.last_ping_at);
+                                tracing::info!("overdue: {:?} (status={}, last_pinged_at={:?})", check.uuid, check.status.to_string(), check.last_ping_at);
                             }
+                            },
+                            Err(e) => tracing::error!("failed to check for overdue checks: {:?}", e)
                         }
                     },
-                    msg = &mut shutdown_rx => {
+                    _msg = &mut shutdown_rx => {
                         break;
                     }
                 }
@@ -50,7 +51,7 @@ impl PollChecks {
     pub async fn stop(&mut self) {
         if let Some(handle) = self.join_handle.take() {
             if let Some(tx) = self.shutdown_tx.take() {
-                if let Err(_) = tx.send(()) {
+                if tx.send(()).is_err() {
                     tracing::error!("failed to send PollChecks job shutdown signal");
                 }
             }
