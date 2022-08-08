@@ -30,11 +30,11 @@ impl PollChecks {
             loop {
                 tokio::select! {
                     _ = poll_interval.tick() => {
-                        tracing::info!("polling for check statuses");
+                        tracing::trace!("polling for check statuses");
                         match task_repository.check().read_overdue().await {
                             Ok(checks) => {
                             for check in checks {
-                                tracing::info!("overdue: {:?} (status={}, last_pinged_at={:?})", check.uuid, check.status.to_string(), check.last_ping_at);
+                                tracing::debug!("overdue: {:?} (status={}, last_pinged_at={:?})", check.uuid, check.status.to_string(), check.last_ping_at);
                             }
                             },
                             Err(e) => tracing::error!("failed to check for overdue checks: {:?}", e)

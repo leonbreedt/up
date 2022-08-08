@@ -1,8 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash, str::FromStr};
 
 use lazy_static::lazy_static;
-use sea_query::{Expr, Iden, Query, SelectStatement};
-use sqlx::Row;
+use sea_query::{Expr, Iden, Query};
 use uuid::Uuid;
 
 use crate::database::DbConnection;
@@ -12,7 +11,7 @@ use crate::{
     shortid::ShortId,
 };
 
-use super::{bind_query, ModelField, Result};
+use super::{bind_query_as, ModelField, Result};
 
 const ENTITY_ACCOUNT: &str = "account";
 
@@ -29,35 +28,24 @@ impl AccountRepository {
     }
 
     pub async fn get_account_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
-        let (sql, params) = queries::read_statement(&[Field::Id])
+        let (sql, params) = Query::select()
+            .from(Field::Table)
+            .columns(vec![Field::Id])
+            .and_where(Expr::col(Field::Deleted).eq(false))
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .build(DbQueryBuilder::default());
-        let row = bind_query(sqlx::query(&sql), &params)
+
+        let result: Option<(i64,)> = bind_query_as(sqlx::query_as(&sql), &params)
             .fetch_optional(&mut *conn)
             .await?;
-        if let Some(row) = row {
-            Ok(row.try_get("id")?)
+        if let Some(result) = result {
+            Ok(result.0)
         } else {
             Err(RepositoryError::NotFound {
                 entity_type: ENTITY_ACCOUNT.to_string(),
                 id: ShortId::from_uuid(uuid).to_string(),
             })
         }
-    }
-}
-
-mod queries {
-    use super::*;
-
-    pub fn read_statement(selected_fields: &[Field]) -> SelectStatement {
-        let mut statement = Query::select();
-
-        statement
-            .from(Field::Table)
-            .columns(selected_fields.to_vec())
-            .and_where(Expr::col(Field::Deleted).eq(false));
-
-        statement
     }
 }
 
