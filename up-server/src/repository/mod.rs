@@ -15,7 +15,9 @@ mod check;
 mod project;
 
 pub mod dto {
-    pub use super::check::{Check, CheckStatus, Field as CheckField, PeriodUnits, ScheduleType};
+    pub use super::check::{
+        Check, CheckStatus, Field as CheckField, OverdueCheck, PeriodUnits, ScheduleType,
+    };
     pub use super::project::{Field as ProjectField, Project};
 }
 

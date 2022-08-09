@@ -3,7 +3,7 @@
 use miette::Diagnostic;
 use thiserror::Error;
 
-use crate::repository::Repository;
+use crate::repository::{dto::OverdueCheck, Repository};
 
 #[derive(Clone)]
 pub struct Notifier {
@@ -20,12 +20,13 @@ impl Notifier {
         Self { repository }
     }
 
-    pub fn send_email(
-        _address: String,
-        _subject: String,
-        _text_body: String,
-        _html_body: String,
-    ) -> Result<()> {
-        Ok(())
+    pub async fn send_overdue_check_notification(&self, check: &OverdueCheck) {
+        tracing::debug!(
+            "overdue: {:?} (status={}, last_pinged_at={:?}, email={})",
+            check.inner.uuid,
+            check.inner.status.to_string(),
+            check.inner.last_ping_at,
+            check.email
+        );
     }
 }

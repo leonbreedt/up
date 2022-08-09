@@ -58,20 +58,33 @@ impl CheckRepository {
         Ok(checks)
     }
 
-    pub async fn read_overdue(&self) -> Result<Vec<Check>> {
+    pub async fn read_overdue(&self) -> Result<Vec<OverdueCheck>> {
         let mut conn = self.database.connection().await?;
 
         tracing::trace!("reading overdue checks");
 
         let sql = r#"
-        SELECT * FROM checks
-        WHERE last_ping_at IS NOT NULL
-        AND NOW() AT TIME ZONE 'UTC' - last_ping_at > INTERVAL '1' HOUR * grace_period
-        AND deleted = false
-        AND status != 'CREATED'
+            SELECT
+                c.*,
+                (SELECT u.email
+                 FROM users u
+                 INNER JOIN user_accounts ua on u.id = ua.user_id
+                 INNER JOIN accounts a on a.id = c.account_id
+                 WHERE u.id = ua.user_id
+                 LIMIT 1) AS email
+            FROM checks AS c
+            WHERE c.last_ping_at IS NOT NULL
+              AND NOW() AT TIME ZONE 'UTC' - c.last_ping_at > INTERVAL '1' HOUR * c.grace_period
+              AND c.deleted = false
+              AND c.status != 'CREATED'
         "#;
 
-        let checks = sqlx::query_as(sql).fetch_all(&mut conn).await?;
+        let checks = sqlx::query(sql)
+            .fetch_all(&mut conn)
+            .await?
+            .into_iter()
+            .map(|row| row.try_into())
+            .collect::<Result<Vec<OverdueCheck>>>()?;
 
         Ok(checks)
     }
@@ -288,14 +301,14 @@ impl CheckRepository {
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .build(DbQueryBuilder::default());
 
-        bind_query(sqlx::query(&sql), &params)
+        let check: Option<Check> = bind_query_as(sqlx::query_as(&sql), &params)
             .fetch_optional(&mut *conn)
-            .await?
-            .map(|row| row.try_into())
-            .ok_or_else(|| RepositoryError::NotFound {
-                entity_type: ENTITY_CHECK.to_string(),
-                id: ShortId::from_uuid(uuid).to_string(),
-            })?
+            .await?;
+
+        check.ok_or_else(|| RepositoryError::NotFound {
+            entity_type: ENTITY_CHECK.to_string(),
+            id: ShortId::from_uuid(uuid).to_string(),
+        })
     }
 }
 
@@ -350,25 +363,34 @@ pub struct Check {
     pub updated_at: Option<NaiveDateTime>,
 }
 
-impl TryFrom<DbRow> for Check {
+pub struct OverdueCheck {
+    pub inner: Check,
+    // TODO: Temporary, we should load a notification entry from an integrations table
+    pub email: String,
+}
+
+impl TryFrom<DbRow> for OverdueCheck {
     type Error = RepositoryError;
 
     fn try_from(row: DbRow) -> std::result::Result<Self, Self::Error> {
         Ok(Self {
-            uuid: row.try_get(Field::Uuid.as_ref())?,
-            ping_key: row.try_get(Field::PingKey.as_ref())?,
-            name: row.try_get(Field::Name.as_ref())?,
-            description: row.try_get(Field::Description.as_ref())?,
-            status: row.try_get(Field::Status.as_ref())?,
-            schedule_type: row.try_get(Field::ScheduleType.as_ref())?,
-            ping_period: row.try_get(Field::PingPeriod.as_ref())?,
-            ping_period_units: row.try_get(Field::PingPeriodUnits.as_ref())?,
-            ping_cron_expression: row.try_get(Field::PingCronExpression.as_ref())?,
-            grace_period: row.try_get(Field::GracePeriod.as_ref())?,
-            grace_period_units: row.try_get(Field::GracePeriodUnits.as_ref())?,
-            last_ping_at: row.try_get(Field::LastPingAt.as_ref())?,
-            created_at: row.try_get(Field::CreatedAt.as_ref())?,
-            updated_at: row.try_get(Field::UpdatedAt.as_ref())?,
+            inner: Check {
+                uuid: row.try_get(Field::Uuid.as_ref())?,
+                ping_key: row.try_get(Field::PingKey.as_ref())?,
+                name: row.try_get(Field::Name.as_ref())?,
+                description: row.try_get(Field::Description.as_ref())?,
+                status: row.try_get(Field::Status.as_ref())?,
+                schedule_type: row.try_get(Field::ScheduleType.as_ref())?,
+                ping_period: row.try_get(Field::PingPeriod.as_ref())?,
+                ping_period_units: row.try_get(Field::PingPeriodUnits.as_ref())?,
+                ping_cron_expression: row.try_get(Field::PingCronExpression.as_ref())?,
+                grace_period: row.try_get(Field::GracePeriod.as_ref())?,
+                grace_period_units: row.try_get(Field::GracePeriodUnits.as_ref())?,
+                last_ping_at: row.try_get(Field::LastPingAt.as_ref())?,
+                created_at: row.try_get(Field::CreatedAt.as_ref())?,
+                updated_at: row.try_get(Field::UpdatedAt.as_ref())?,
+            },
+            email: row.try_get("email")?,
         })
     }
 }

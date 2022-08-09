@@ -61,9 +61,9 @@ impl App {
         database.migrate().await?;
 
         let repository = Repository::new(database.clone());
-
         let notifier = Notifier::with_repository(repository.clone());
-        let mut poll_checks_job = jobs::PollChecks::with_repository(repository.clone());
+        let mut poll_checks_job =
+            jobs::PollChecks::with_repository(repository.clone(), notifier.clone());
 
         let router = api::build(repository, notifier);
 
