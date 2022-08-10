@@ -2,13 +2,13 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use argh::FromArgs;
+use dotenv::dotenv;
 use miette::{IntoDiagnostic, Result};
 use tracing_subscriber::EnvFilter;
 
-use crate::jobs::PollChecks;
-use crate::notifier::Notifier;
-use crate::repository::Repository;
-use crate::{api, database, jobs};
+use crate::{
+    api, database, integrations, jobs::PollChecks, notifier::Notifier, repository::Repository,
+};
 
 static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 
@@ -28,6 +28,8 @@ impl App {
     }
 
     pub async fn run(&self) -> Result<()> {
+        dotenv().ok();
+
         miette::set_panic_hook();
 
         if std::env::var_os("RUST_BACKTRACE").is_none() {
@@ -61,9 +63,9 @@ impl App {
         database.migrate().await?;
 
         let repository = Repository::new(database.clone());
-        let notifier = Notifier::with_repository(repository.clone());
-        let mut poll_checks_job =
-            jobs::PollChecks::with_repository(repository.clone(), notifier.clone());
+        let postmark_client = integrations::postmark::PostmarkClient::new()?;
+        let notifier = Notifier::new(repository.clone(), postmark_client);
+        let mut poll_checks_job = PollChecks::with_repository(repository.clone(), notifier.clone());
 
         let router = api::build(repository, notifier);
 
