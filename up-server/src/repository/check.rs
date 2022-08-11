@@ -58,35 +58,160 @@ impl CheckRepository {
         Ok(checks)
     }
 
-    pub async fn read_overdue(&self) -> Result<Vec<OverdueCheck>> {
-        let mut conn = self.database.connection().await?;
+    pub async fn enqueue_notification_alerts_for_overdue_pings(&self) -> Result<()> {
+        let mut tx = self.database.transaction().await?;
 
-        tracing::trace!("reading overdue checks");
+        tracing::trace!("checking for overdue pings");
 
-        let sql = r#"
+        // Overdue pings on checks:
+        //
+        // - Are for checks that have been pinged successfully at least once
+        // - Are not currently paused
+        // - Have not been pinged before ping period elapsed
+        // - Have not been pinged before late ping grace period elapsed
+
+        let overdue_ping_sql = r#"
             SELECT
-                c.*,
-                (SELECT u.email
-                 FROM users u
-                 INNER JOIN user_accounts ua on u.id = ua.user_id
-                 INNER JOIN accounts a on a.id = c.account_id
-                 WHERE u.id = ua.user_id
-                 LIMIT 1) AS email
-            FROM checks AS c
-            WHERE c.last_ping_at IS NOT NULL
-              AND NOW() AT TIME ZONE 'UTC' - c.last_ping_at > INTERVAL '1' HOUR * c.grace_period
-              AND c.deleted = false
-              AND c.status != 'CREATED'
+                o.id,
+                o.uuid,
+                o.status,
+                o.name,
+                o.last_ping_at,
+                o.ping_overdue,
+                o.ping_overdue_at,
+                o.late_ping_overdue,
+                o.late_ping_overdue_at
+            FROM (
+                SELECT
+                  c.*,
+                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval) AS ping_overdue,
+                  (last_ping_at + c.ping_period_interval) AS ping_overdue_at,
+                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval + c.grace_period_interval) AS late_ping_overdue,
+                  (last_ping_at + c.ping_period_interval + c.grace_period_interval) AS late_ping_overdue_at
+                FROM (
+                       SELECT
+                           id,
+                           uuid,
+                           name,
+                           status,
+                           last_ping_at,
+                           (CASE ping_period_units
+                                WHEN 'HOURS' THEN INTERVAL '1' HOUR
+                                WHEN 'DAYS' THEN INTERVAL '1' DAY
+                                END * ping_period) AS ping_period_interval,
+                           (CASE grace_period_units
+                                WHEN 'HOURS' THEN INTERVAL '1' HOUR
+                                WHEN 'DAYS' THEN INTERVAL '1' DAY
+                                END * grace_period) AS grace_period_interval
+                       FROM
+                           checks
+                       WHERE
+                               deleted = false
+                         AND last_ping_at IS NOT NULL
+                         AND status NOT IN ('CREATED', 'PAUSED')
+                   ) AS c
+                ) AS o
+            WHERE
+                o.ping_overdue = true
+                OR
+                o.late_ping_overdue = true;
         "#;
 
-        let checks = sqlx::query(sql)
-            .fetch_all(&mut conn)
-            .await?
-            .into_iter()
-            .map(|row| row.try_into())
-            .collect::<Result<Vec<OverdueCheck>>>()?;
+        let overdue_pings: Vec<(
+            i64,
+            Uuid,
+            CheckStatus,
+            String,
+            NaiveDateTime,
+            bool,
+            Option<NaiveDateTime>,
+            bool,
+            Option<NaiveDateTime>,
+        )> = sqlx::query_as(overdue_ping_sql).fetch_all(&mut tx).await?;
 
-        Ok(checks)
+        for ping_details in overdue_pings {
+            let (
+                check_id,
+                check_uuid,
+                check_status,
+                check_name,
+                last_ping_at,
+                _ping_overdue,
+                _ping_overdue_at,
+                _late_ping_overdue,
+                _late_ping_overdue_at,
+            ) = ping_details;
+
+            let sql = r"
+                SELECT
+                    n.id,
+                    n.notification_type,
+                    n.email,
+                    n.url,
+                    n.max_retries
+                FROM
+                    check_notifications cn INNER JOIN notifications n ON cn.notification_id = n.id AND cn.check_id = $1
+                WHERE
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM notification_alerts a
+                        WHERE
+                            a.check_id = cn.check_id
+                            AND
+                            a.notification_id = n.id
+                    )
+            ";
+
+            let notifications_to_alert: Vec<(
+                i64,
+                NotificationType,
+                Option<String>,
+                Option<String>,
+                i32,
+            )> = sqlx::query_as(sql)
+                .bind(check_id)
+                .fetch_all(&mut tx)
+                .await?;
+
+            for (notification_id, notification_type, email, url, retries_remaining) in
+                notifications_to_alert
+            {
+                let sql = r"
+                INSERT INTO notification_alerts (
+                    check_id,
+                    check_status,
+                    notification_id,
+                    retries_remaining
+                ) VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4
+                );
+                ";
+                sqlx::query(sql)
+                    .bind(check_id)
+                    .bind(check_status.clone())
+                    .bind(notification_id)
+                    .bind(retries_remaining)
+                    .execute(&mut tx)
+                    .await?;
+
+                tracing::debug!(
+                    check_id = ShortId::from(check_uuid).to_string(),
+                    name = check_name,
+                    alert_type = notification_type.to_string(),
+                    email = email,
+                    url = url,
+                    last_ping_at = last_ping_at.to_string(),
+                    "sending alert"
+                );
+            }
+        }
+
+        tx.commit().await?;
+
+        Ok(())
     }
 
     pub async fn create(
@@ -319,7 +444,7 @@ pub enum ScheduleType {
     Cron,
 }
 
-#[derive(sqlx::Type)]
+#[derive(sqlx::Type, Copy, Clone)]
 #[sqlx(type_name = "check_status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CheckStatus {
     Up,
@@ -361,6 +486,24 @@ pub struct Check {
     pub last_ping_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
     pub updated_at: Option<NaiveDateTime>,
+}
+
+// TODO: Add Notification
+
+#[derive(sqlx::Type, Debug)]
+#[sqlx(type_name = "notification_type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum NotificationType {
+    Email,
+    Webhook,
+}
+
+impl ToString for NotificationType {
+    fn to_string(&self) -> String {
+        match self {
+            NotificationType::Email => "EMAIL".to_string(),
+            NotificationType::Webhook => "WEBHOOK".to_string(),
+        }
+    }
 }
 
 pub struct OverdueCheck {

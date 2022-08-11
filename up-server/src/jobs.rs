@@ -34,7 +34,7 @@ impl PollChecks {
             loop {
                 tokio::select! {
                     _ = poll_interval.tick() => {
-                        notify_overdue_checks(&repository, &notifier).await
+                        perform_polling(&repository, &notifier).await
                     },
                     _msg = &mut shutdown_rx => {
                         break;
@@ -58,14 +58,12 @@ impl PollChecks {
     }
 }
 
-async fn notify_overdue_checks(repository: &Repository, notifier: &Notifier) {
-    tracing::trace!("polling for check statuses");
-    match repository.check().read_overdue().await {
-        Ok(checks) => {
-            for check in checks {
-                notifier.send_overdue_check_notification(&check).await
-            }
-        }
-        Err(e) => tracing::error!("failed to check for overdue checks: {:?}", e),
+async fn perform_polling(repository: &Repository, _notifier: &Notifier) {
+    if let Err(e) = repository
+        .check()
+        .enqueue_notification_alerts_for_overdue_pings()
+        .await
+    {
+        tracing::error!("failed to enqueue overdue ping notifications: {:?}", e);
     }
 }

@@ -26,7 +26,7 @@ pub async fn ping(
                 remote_ip = remote_addr.ip().to_string().as_str(),
                 remote_port = remote_addr.port(),
                 user_agent = user_agent.as_str(),
-                id = ShortId::from(uuid).to_string(),
+                check_id = ShortId::from(uuid).to_string(),
                 key = mask::ping_key(key.as_str()),
                 "ping received"
             );

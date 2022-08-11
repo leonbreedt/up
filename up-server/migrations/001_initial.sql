@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS user_projects (
 
 CREATE TYPE schedule_type AS ENUM ('SIMPLE', 'CRON');
 CREATE TYPE period_units  AS ENUM ('MINUTES', 'HOURS', 'DAYS');
-CREATE TYPE check_status  AS ENUM ('UP', 'DOWN', 'CREATED');
+CREATE TYPE check_status  AS ENUM ('UP', 'DOWN', 'CREATED', 'PAUSED');
 
 CREATE TABLE IF NOT EXISTS checks (
     id                   BIGSERIAL PRIMARY KEY,
@@ -87,6 +87,43 @@ CREATE TABLE IF NOT EXISTS checks (
     CONSTRAINT checks_unique_uuid UNIQUE (uuid),
     CONSTRAINT checks_unique_ping_key UNIQUE (ping_key),
     CONSTRAINT checks_unique_shortid UNIQUE (shortid)
+);
+
+CREATE TYPE notification_type AS ENUM ('EMAIL', 'WEBHOOK');
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id                          BIGSERIAL PRIMARY KEY,
+    account_id                  BIGINT NOT NULL REFERENCES accounts (id),
+    project_id                  BIGINT NOT NULL REFERENCES projects (id),
+    uuid                        UUID NOT NULL DEFAULT gen_random_uuid(),
+    notification_type           notification_type NOT NULL,
+    email                       TEXT,
+    url                         TEXT,
+    max_retries                 INTEGER NOT NULL DEFAULT 5,
+    created_at                  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    updated_at                  TIMESTAMP WITHOUT TIME ZONE,
+    deleted                     BOOLEAN NOT NULL DEFAULT false,
+    deleted_at                  TIMESTAMP WITHOUT TIME ZONE,
+
+    CONSTRAINT notifications_unique_uuid UNIQUE (uuid)
+);
+
+CREATE TABLE IF NOT EXISTS check_notifications (
+    check_id          BIGINT NOT NULL REFERENCES checks (id),
+    notification_id   BIGINT NOT NULL REFERENCES notifications (id),
+    PRIMARY KEY (check_id, notification_id)
+);
+
+CREATE TYPE alert_delivery_status AS ENUM ('PENDING', 'DELIVERED', 'FAILED');
+
+CREATE TABLE IF NOT EXISTS notification_alerts (
+    check_id            BIGINT NOT NULL REFERENCES checks (id),
+    notification_id     BIGINT NOT NULL REFERENCES notifications (id),
+    check_status        check_status NOT NULL,
+    delivery_status     alert_delivery_status NOT NULL DEFAULT 'PENDING',
+    retries_remaining   INTEGER NOT NULL,
+    created_at          TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    finished_at         TIMESTAMP WITHOUT TIME ZONE
 );
 
 CREATE TABLE IF NOT EXISTS tags (
