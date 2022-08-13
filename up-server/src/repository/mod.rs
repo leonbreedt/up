@@ -3,29 +3,32 @@ sea_query::sea_query_driver_postgres!();
 
 pub use sea_query_driver_postgres::{bind_query, bind_query_as};
 
+use std::{fmt::Debug, hash::Hash, str::FromStr};
+
 use miette::Diagnostic;
+use sea_query::{Expr, QueryBuilder, SimpleExpr, Value};
 use sqlx::{Row, ValueRef};
-use std::fmt::Debug;
-use std::hash::Hash;
-use std::str::FromStr;
 use thiserror::Error;
 
 mod account;
 mod check;
+mod notification;
 mod project;
 
 pub mod dto {
     pub use super::check::{
         Check, CheckStatus, Field as CheckField, OverdueCheck, PeriodUnits, ScheduleType,
     };
+    pub use super::notification::{Field as NotificationField, Notification, NotificationType};
     pub use super::project::{Field as ProjectField, Project};
 }
 
 use account::AccountRepository;
 use check::CheckRepository;
+use notification::NotificationRepository;
 use project::ProjectRepository;
 
-use crate::database::{Database, DbRow, DbType};
+use crate::database::{Database, DbQueryBuilder, DbRow, DbType};
 
 type Result<T> = miette::Result<T, RepositoryError>;
 
@@ -37,6 +40,7 @@ pub trait ModelField: Debug + Clone + Hash + PartialEq + Eq + FromStr + AsRef<st
 pub struct Repository {
     check: CheckRepository,
     project: ProjectRepository,
+    notification: NotificationRepository,
 }
 
 #[derive(Error, Diagnostic, Debug)]
@@ -59,8 +63,13 @@ impl Repository {
     pub fn new(database: Database) -> Self {
         let account = AccountRepository::new(database.clone());
         let project = ProjectRepository::new(database.clone(), account.clone());
-        let check = CheckRepository::new(database, account, project.clone());
-        Self { check, project }
+        let check = CheckRepository::new(database.clone(), account.clone(), project.clone());
+        let notification = NotificationRepository::new(database, account, project.clone());
+        Self {
+            check,
+            project,
+            notification,
+        }
     }
 
     pub fn check(&self) -> &CheckRepository {
@@ -69,6 +78,10 @@ impl Repository {
 
     pub fn project(&self) -> &ProjectRepository {
         &self.project
+    }
+
+    pub fn notification(&self) -> &NotificationRepository {
+        &self.notification
     }
 }
 
@@ -92,4 +105,52 @@ where
     } else {
         Ok(None)
     }
+}
+
+/// Represents a value to update in a repository.
+#[derive(Clone)]
+pub enum QueryValue<T: ModelField> {
+    Value(T, Value),
+    Expression(T, SimpleExpr),
+}
+
+impl<T: ModelField> QueryValue<T> {
+    pub fn field(&self) -> &T {
+        match self {
+            Self::Value(f, _) => f,
+            Self::Expression(f, _) => f,
+        }
+    }
+
+    pub fn as_expr(&self) -> SimpleExpr {
+        match self {
+            Self::Value(_, v) => Expr::value(v.clone()),
+            Self::Expression(_, e) => e.clone(),
+        }
+    }
+}
+
+impl<T: ModelField> ToString for QueryValue<T> {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Value(_f, v) => DbQueryBuilder::default().value_to_string(v),
+            Self::Expression(_f, v) => format!("{:?}", v),
+        }
+    }
+}
+
+pub fn column_value<F, V>(field: F, value: V) -> QueryValue<F>
+where
+    F: ModelField,
+    V: Into<Value>,
+{
+    QueryValue::Value(field, value.into())
+}
+
+pub fn column_expression<F, E>(field: F, value: E) -> QueryValue<F>
+where
+    F: ModelField,
+    E: Into<SimpleExpr>,
+{
+    QueryValue::Expression(field, value.into())
 }

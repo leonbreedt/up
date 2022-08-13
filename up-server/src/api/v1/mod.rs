@@ -13,6 +13,7 @@ use crate::repository::RepositoryError;
 use super::{ReportRenderer, ReportType};
 
 pub mod checks;
+pub mod notifications;
 pub mod ping;
 pub mod projects;
 
@@ -26,13 +27,18 @@ pub enum ApiError {
 pub fn router() -> Router {
     Router::new()
         .route("/api/v1/checks", get(checks::read_all))
-        .route("/api/v1/checks", post(checks::create))
         .route("/api/v1/checks/:id", get(checks::read_one))
+        .route("/api/v1/checks", post(checks::create))
         .route("/api/v1/checks/:id", patch(checks::update))
         .route("/api/v1/checks/:id", delete(checks::delete))
+        .route("/api/v1/notifications", get(notifications::read_all))
+        .route("/api/v1/notifications", post(notifications::create))
+        .route("/api/v1/notifications/:id", get(notifications::read_one))
+        .route("/api/v1/notifications/:id", patch(notifications::update))
+        .route("/api/v1/notifications/:id", delete(notifications::delete))
         .route("/api/v1/projects", get(projects::read_all))
-        .route("/api/v1/projects", post(projects::create))
         .route("/api/v1/projects/:id", get(projects::read_one))
+        .route("/api/v1/projects", post(projects::create))
         .route("/api/v1/projects/:id", patch(projects::update))
         .route("/api/v1/projects/:id", delete(projects::delete))
         .route("/api/v1/ping/:key", post(ping::ping))

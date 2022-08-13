@@ -82,17 +82,16 @@ pub async fn delete(
     Ok(Empty::new())
 }
 
-/// Conversion from repository [`dto::project::Project`] to
-/// API [`Project`].
-impl From<dto::Project> for Project {
-    fn from(issue: dto::Project) -> Self {
-        Self {
-            id: issue.uuid.unwrap().into(),
-            name: issue.name.unwrap(),
-            created_at: issue.created_at.unwrap(),
-            updated_at: issue.updated_at,
-        }
-    }
+// API model types
+
+/// An API [`Project`] type.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Project {
+    pub id: ShortId,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 /// Body for `POST /api/v1/projects`
@@ -109,12 +108,17 @@ pub struct UpdateProject {
     pub name: Option<String>,
 }
 
-/// An API [`Project`] type.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Project {
-    pub id: ShortId,
-    pub name: String,
-    pub created_at: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime<Utc>>,
+// Model conversions
+
+/// Conversion from repository [`dto::Project`] to
+/// API [`Project`].
+impl From<dto::Project> for Project {
+    fn from(issue: dto::Project) -> Self {
+        Self {
+            id: issue.uuid.unwrap().into(),
+            name: issue.name.unwrap(),
+            created_at: issue.created_at.unwrap(),
+            updated_at: issue.updated_at,
+        }
+    }
 }

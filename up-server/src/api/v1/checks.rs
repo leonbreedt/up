@@ -49,7 +49,7 @@ pub async fn create(
     Ok(check.into())
 }
 
-/// Handler for `PUT /api/v1/checks/:id`
+/// Handler for `PATCH /api/v1/checks/:id`
 pub async fn update(
     Path(id): Path<ShortId>,
     repository: Extension<Repository>,
@@ -85,7 +85,7 @@ pub struct CreateCheck {
     pub name: String,
 }
 
-/// Body for `PUT /api/v1/checks`
+/// Body for `PATCH /api/v1/checks`
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateCheck {
     pub name: Option<String>,
@@ -138,7 +138,7 @@ pub struct Check {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
-/// Conversion from repository [`dto::check::Check`] to
+/// Conversion from repository [`dto::Check`] to
 /// API [`Check`].
 impl From<dto::Check> for Check {
     fn from(issue: dto::Check) -> Self {
@@ -160,7 +160,7 @@ impl From<dto::Check> for Check {
     }
 }
 
-/// Conversion from repository [`dto::check::CheckStatus`] to
+/// Conversion from repository [`dto::CheckStatus`] to
 /// API [`CheckStatus`].
 impl From<dto::CheckStatus> for CheckStatus {
     fn from(status: dto::CheckStatus) -> Self {
@@ -172,7 +172,7 @@ impl From<dto::CheckStatus> for CheckStatus {
     }
 }
 
-/// Conversion from repository [`dto::check::ScheduleType`] to
+/// Conversion from repository [`dto::ScheduleType`] to
 /// API [`ScheduleType`].
 impl From<dto::ScheduleType> for ScheduleType {
     fn from(status: dto::ScheduleType) -> Self {
@@ -183,7 +183,7 @@ impl From<dto::ScheduleType> for ScheduleType {
     }
 }
 
-/// Conversion from repository [`dto::check::PeriodUnits`] to
+/// Conversion from repository [`dto::PeriodUnits`] to
 /// API [`PeriodUnits`].
 impl From<dto::PeriodUnits> for PeriodUnits {
     fn from(status: dto::PeriodUnits) -> Self {

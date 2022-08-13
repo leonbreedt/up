@@ -112,7 +112,7 @@ impl PostmarkClient {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct SendEmailRequest {
     pub from: String,
@@ -129,7 +129,7 @@ pub struct SendEmailRequest {
     pub metadata: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct SendEmailResponse {
     pub error_code: i32,
@@ -141,7 +141,7 @@ pub struct SendEmailResponse {
     pub to: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Body {
     #[serde(rename = "TextBody")]
     Text(String),

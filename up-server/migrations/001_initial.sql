@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     account_id                  BIGINT NOT NULL REFERENCES accounts (id),
     project_id                  BIGINT NOT NULL REFERENCES projects (id),
     uuid                        UUID NOT NULL DEFAULT gen_random_uuid(),
+    name                        TEXT NOT NULL DEFAULT '',
     notification_type           notification_type NOT NULL,
     email                       TEXT,
     url                         TEXT,

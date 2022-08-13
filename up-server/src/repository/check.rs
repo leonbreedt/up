@@ -76,18 +76,12 @@ impl CheckRepository {
                 o.uuid,
                 o.status,
                 o.name,
-                o.last_ping_at,
-                o.ping_overdue,
-                o.ping_overdue_at,
-                o.late_ping_overdue,
-                o.late_ping_overdue_at
+                o.last_ping_at
             FROM (
                 SELECT
                   c.*,
                   (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval) AS ping_overdue,
-                  (last_ping_at + c.ping_period_interval) AS ping_overdue_at,
-                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval + c.grace_period_interval) AS late_ping_overdue,
-                  (last_ping_at + c.ping_period_interval + c.grace_period_interval) AS late_ping_overdue_at
+                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval + c.grace_period_interval) AS late_ping_overdue
                 FROM (
                        SELECT
                            id,
@@ -117,30 +111,11 @@ impl CheckRepository {
                 o.late_ping_overdue = true;
         "#;
 
-        let overdue_pings: Vec<(
-            i64,
-            Uuid,
-            CheckStatus,
-            String,
-            NaiveDateTime,
-            bool,
-            Option<NaiveDateTime>,
-            bool,
-            Option<NaiveDateTime>,
-        )> = sqlx::query_as(overdue_ping_sql).fetch_all(&mut tx).await?;
+        let overdue_pings: Vec<(i64, Uuid, CheckStatus, String, NaiveDateTime)> =
+            sqlx::query_as(overdue_ping_sql).fetch_all(&mut tx).await?;
 
         for ping_details in overdue_pings {
-            let (
-                check_id,
-                check_uuid,
-                check_status,
-                check_name,
-                last_ping_at,
-                _ping_overdue,
-                _ping_overdue_at,
-                _late_ping_overdue,
-                _late_ping_overdue_at,
-            ) = ping_details;
+            let (check_id, check_uuid, check_status, check_name, last_ping_at) = ping_details;
 
             let sql = r"
                 SELECT
@@ -162,6 +137,7 @@ impl CheckRepository {
                     )
             ";
 
+            #[allow(clippy::type_complexity)]
             let notifications_to_alert: Vec<(
                 i64,
                 NotificationType,
@@ -191,7 +167,7 @@ impl CheckRepository {
                 ";
                 sqlx::query(sql)
                     .bind(check_id)
-                    .bind(check_status.clone())
+                    .bind(check_status)
                     .bind(notification_id)
                     .bind(retries_remaining)
                     .execute(&mut tx)
@@ -351,6 +327,7 @@ impl CheckRepository {
         tracing::trace!(uuid = uuid.to_string(), "deleting check");
 
         let (sql, params) = Query::update()
+            .table(Field::Table)
             .values(vec![
                 (Field::Deleted, true.into()),
                 (Field::DeletedAt, Utc::now().into()),
