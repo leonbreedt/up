@@ -33,7 +33,7 @@ impl ProjectRepository {
         Self { database, account }
     }
 
-    pub async fn get_project_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
+    pub async fn get_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
         let (sql, params) = queries::read_statement(&[Field::Id])
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .build(DbQueryBuilder::default());
@@ -50,17 +50,17 @@ impl ProjectRepository {
         }
     }
 
-    pub async fn read_one_project(&self, select_fields: &[Field], uuid: &Uuid) -> Result<Project> {
+    pub async fn read_one(&self, select_fields: &[Field], uuid: &Uuid) -> Result<Project> {
         let mut conn = self.database.connection().await?;
         queries::read_one(&mut conn, select_fields, uuid).await
     }
 
-    pub async fn read_projects(&self, select_fields: &[Field]) -> Result<Vec<Project>> {
+    pub async fn read_all(&self, select_fields: &[Field]) -> Result<Vec<Project>> {
         let mut conn = self.database.connection().await?;
         queries::read_all(&mut conn, select_fields).await
     }
 
-    pub async fn create_project(
+    pub async fn create(
         &self,
         select_fields: &[Field],
         account_uuid: &Uuid,
@@ -68,7 +68,7 @@ impl ProjectRepository {
     ) -> Result<Project> {
         let mut tx = self.database.transaction().await?;
 
-        let account_id = self.account.get_account_id(&mut tx, account_uuid).await?;
+        let account_id = self.account.get_id(&mut tx, account_uuid).await?;
         let project = queries::insert(&mut tx, select_fields, account_id, name).await?;
         let uuid = project.uuid.as_ref().unwrap();
 
@@ -84,7 +84,7 @@ impl ProjectRepository {
         Ok(project)
     }
 
-    pub async fn update_project(
+    pub async fn update(
         &self,
         uuid: &Uuid,
         select_fields: &[Field],
@@ -105,7 +105,7 @@ impl ProjectRepository {
         Ok((updated, check))
     }
 
-    pub async fn delete_project(&self, uuid: &Uuid) -> Result<bool> {
+    pub async fn delete(&self, uuid: &Uuid) -> Result<bool> {
         let mut tx = self.database.transaction().await?;
 
         let deleted = queries::delete(&mut tx, uuid).await?;

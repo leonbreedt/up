@@ -18,7 +18,7 @@ pub async fn read_one(
 ) -> Result<Json<Project>, ApiError> {
     let project: Project = repository
         .project()
-        .read_one_project(dto::ProjectField::all(), id.as_uuid())
+        .read_one(dto::ProjectField::all(), id.as_uuid())
         .await?
         .into();
     Ok(project.into())
@@ -30,7 +30,7 @@ pub async fn read_all(
 ) -> Result<Json<Vec<Project>>, ApiError> {
     let projects: Vec<Project> = repository
         .project()
-        .read_projects(dto::ProjectField::all())
+        .read_all(dto::ProjectField::all())
         .await?
         .into_iter()
         .map(|i| i.into())
@@ -45,7 +45,7 @@ pub async fn create(
 ) -> Result<Json<Project>, ApiError> {
     let project = repository
         .project()
-        .create_project(
+        .create(
             dto::ProjectField::all(),
             request.account_id.as_uuid(),
             &request.name,
@@ -67,7 +67,7 @@ pub async fn update(
     }
     let (_, project) = repository
         .project()
-        .update_project(id.as_uuid(), dto::ProjectField::all(), update_fields)
+        .update(id.as_uuid(), dto::ProjectField::all(), update_fields)
         .await?;
     let project: Project = project.into();
     Ok(project.into())
@@ -78,7 +78,7 @@ pub async fn delete(
     Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.project().delete_project(id.as_uuid()).await?;
+    repository.project().delete(id.as_uuid()).await?;
     Ok(Empty::new())
 }
 

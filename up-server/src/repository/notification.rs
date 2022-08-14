@@ -71,8 +71,8 @@ impl NotificationRepository {
     ) -> Result<Notification> {
         let mut tx = self.database.transaction().await?;
 
-        let account_id = self.account.get_account_id(&mut tx, account_uuid).await?;
-        let project_id = self.project.get_project_id(&mut tx, project_uuid).await?;
+        let account_id = self.account.get_id(&mut tx, account_uuid).await?;
+        let project_id = self.project.get_id(&mut tx, project_uuid).await?;
 
         let mut name = String::new();
 

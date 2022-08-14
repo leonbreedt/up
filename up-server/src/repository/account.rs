@@ -27,7 +27,7 @@ impl AccountRepository {
         }
     }
 
-    pub async fn get_account_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
+    pub async fn get_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
         let (sql, params) = Query::select()
             .from(Field::Table)
             .columns(vec![Field::Id])
