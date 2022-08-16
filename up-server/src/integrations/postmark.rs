@@ -1,16 +1,20 @@
-use crate::mask;
 use chrono::{DateTime, Utc};
-use miette::{Diagnostic, Result};
+use miette::Diagnostic;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 use tracing::Level;
 
+use crate::mask;
+
+pub type Result<T> = miette::Result<T, PostmarkError>;
+
 const POSTMARK_API_TOKEN_ENV: &str = "POSTMARK_API_TOKEN";
 const POSTMARK_API_BASE_URL: &str = "https://api.postmarkapp.com";
 const POSTMARK_API_ENDPOINT_EMAIL: &str = "/email";
 const POSTMARK_API_TOKEN_HEADER: &str = "X-Postmark-Server-Token";
+const POSTMARK_API_TEST_TOKEN: &str = "POSTMARK_API_TEST";
 
 #[derive(Clone)]
 pub struct PostmarkClient {
@@ -50,6 +54,12 @@ impl PostmarkClient {
         let api_base_url: url::Url = POSTMARK_API_BASE_URL
             .parse()
             .map_err(PostmarkError::UrlParsingError)?;
+
+        if token == POSTMARK_API_TEST_TOKEN {
+            tracing::warn!(
+                "the Postmark token is the API test token, emails will not actually be sent"
+            );
+        }
 
         Ok(Self {
             token,

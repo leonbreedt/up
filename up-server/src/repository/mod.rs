@@ -16,10 +16,10 @@ mod notification;
 mod project;
 
 pub mod dto {
-    pub use super::check::{
-        Check, CheckStatus, Field as CheckField, OverdueCheck, PeriodUnits, ScheduleType,
+    pub use super::check::{Check, CheckStatus, Field as CheckField, PeriodUnits, ScheduleType};
+    pub use super::notification::{
+        Field as NotificationField, Notification, NotificationAlert, NotificationType,
     };
-    pub use super::notification::{Field as NotificationField, Notification, NotificationType};
     pub use super::project::{Field as ProjectField, Project};
 }
 
@@ -57,6 +57,9 @@ pub enum RepositoryError {
     #[error("failed to build SQL query")]
     #[diagnostic(code(up::error::sql_query))]
     BuildSqlQueryFailed(#[from] sea_query::error::Error),
+    #[error("failed to execute background task")]
+    #[diagnostic(code(up::error::background_task))]
+    BackgroundTaskFailed(#[from] tokio::task::JoinError),
 }
 
 impl Repository {

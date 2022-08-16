@@ -6,9 +6,7 @@ use dotenv::dotenv;
 use miette::{IntoDiagnostic, Result};
 use tracing_subscriber::EnvFilter;
 
-use crate::{
-    api, database, integrations, jobs::PollChecks, notifier::Notifier, repository::Repository,
-};
+use crate::{api, database, integrations, jobs, notifier::Notifier, repository::Repository};
 
 static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 
@@ -65,7 +63,9 @@ impl App {
         let repository = Repository::new(database.clone());
         let postmark_client = integrations::postmark::PostmarkClient::new()?;
         let notifier = Notifier::new(repository.clone(), postmark_client);
-        let mut poll_checks_job = PollChecks::with_repository(repository.clone(), notifier.clone());
+        let mut enqueue_alerts_job = jobs::EnqueueAlerts::with_repository(repository.clone());
+        let mut send_alerts_job =
+            jobs::SendAlerts::with_repository(repository.clone(), notifier.clone());
 
         let router = api::build(repository, notifier);
 
@@ -80,12 +80,16 @@ impl App {
             "server started"
         );
 
-        poll_checks_job.spawn().await;
+        enqueue_alerts_job.spawn().await;
+        send_alerts_job.spawn().await;
 
         let server = axum::Server::bind(&self.args.listen_address)
             .serve(router.into_make_service_with_connect_info::<SocketAddr>());
 
-        let graceful = server.with_graceful_shutdown(shutdown_signal(&mut poll_checks_job));
+        let graceful = server.with_graceful_shutdown(shutdown_signal(
+            &mut enqueue_alerts_job,
+            &mut send_alerts_job,
+        ));
         graceful.await.into_diagnostic()?;
 
         tracing::debug!("server terminated");
@@ -94,12 +98,17 @@ impl App {
     }
 }
 
-async fn shutdown_signal(poll_checks_job: &mut PollChecks) {
+async fn shutdown_signal(
+    enqueue_alerts_job: &mut jobs::EnqueueAlerts,
+    send_alerts_job: &mut jobs::SendAlerts,
+) {
     tokio::signal::ctrl_c()
         .await
         .expect("failed to handle Ctrl-C signal");
     tracing::info!("ctrl-c received");
-    poll_checks_job.stop().await;
+
+    enqueue_alerts_job.stop().await;
+    send_alerts_job.stop().await;
 }
 
 #[derive(FromArgs)]

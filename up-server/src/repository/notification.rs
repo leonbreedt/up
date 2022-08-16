@@ -3,15 +3,18 @@ use std::{collections::HashMap, fmt::Write as _, str::FromStr};
 use chrono::{NaiveDateTime, Utc};
 use lazy_static::lazy_static;
 use sea_query::{Alias, Expr, Iden, Query, QueryBuilder, SelectStatement, SimpleExpr};
+use sqlx::Row;
 use tracing::Level;
 use uuid::Uuid;
 
 use super::{bind_query, bind_query_as, ModelField};
 
-use crate::repository::column_value;
 use crate::{
     database::{Database, DbConnection, DbQueryBuilder},
-    repository::{check::CheckRepository, dto::CheckField, QueryValue, RepositoryError, Result},
+    notifier::Notifier,
+    repository::{
+        check::CheckRepository, column_value, dto::CheckField, QueryValue, RepositoryError, Result,
+    },
     shortid::ShortId,
 };
 
@@ -22,8 +25,6 @@ pub struct NotificationRepository {
     database: Database,
     check: CheckRepository,
 }
-
-impl NotificationRepository {}
 
 impl NotificationRepository {
     pub fn new(database: Database, check: CheckRepository) -> Self {
@@ -253,6 +254,122 @@ impl NotificationRepository {
         Ok(deleted)
     }
 
+    pub async fn send_alert_batch(&self, notifier: &Notifier) -> Result<Vec<NotificationAlert>> {
+        let mut tx = self.database.transaction().await?;
+
+        let sql = r"
+            SELECT
+                a.id,
+                a.retries_remaining,
+                n.notification_type,
+                n.email,
+                n.url,
+                n.max_retries,
+                c.uuid as check_uuid,
+                (CASE LTRIM(RTRIM(n.name))
+                WHEN '' THEN c.name
+                ELSE n.name
+                END) AS name,
+                c.last_ping_at
+            FROM
+                notification_alerts a
+                INNER JOIN
+                notifications n ON n.id = a.notification_id AND n.deleted = false
+                INNER JOIN
+                checks c ON c.id = n.check_id AND c.deleted = false
+            WHERE
+                delivery_status = 'QUEUED'
+                OR
+                (delivery_status = 'FAILED' AND retries_remaining > 0)
+            ORDER BY
+                a.created_at ASC
+            LIMIT 10
+            FOR UPDATE SKIP LOCKED
+            ";
+
+        let alerts: Vec<NotificationAlert> = sqlx::query_as(sql).fetch_all(&mut tx).await?;
+        let mut sent_alerts = Vec::new();
+        let mut failed_alerts = Vec::new();
+
+        for alert in alerts {
+            match notifier.send_alert(&alert).await {
+                Ok(_) => sent_alerts.push(alert),
+                Err(e) => {
+                    tracing::error!("failed to send alert: {:?}", e);
+                    failed_alerts.push(alert)
+                }
+            }
+        }
+
+        for alert in sent_alerts.iter() {
+            // TODO: Include confirmation from server, e.g. Message ID or HTTP status?
+            let sql = r"
+            UPDATE notification_alerts
+            SET delivery_status = 'DELIVERED', finished_at = NOW() AT TIME ZONE 'UTC'
+            WHERE id = $1
+            ";
+
+            let result = sqlx::query(sql).bind(alert.id).execute(&mut tx).await?;
+            if result.rows_affected() != 1 {
+                tracing::warn!(
+                    alert_id = alert.id,
+                    "alert delivered successfully, but failed to update status, duplicate will be sent later",
+                );
+            } else {
+                tracing::debug!(alert_id = alert.id, "alert delivered successfully");
+            }
+        }
+
+        for alert in failed_alerts {
+            // TODO: Include confirmation from server, e.g. Message ID or HTTP status?
+            let sql = if alert.retries_remaining <= 0 {
+                r"
+                    UPDATE notification_alerts
+                    SET
+                        delivery_status = 'FAILED',
+                        retries_remaining = 0,
+                        finished_at = NOW() AT TIME ZONE 'UTC'
+                    WHERE
+                        id = $1
+                    RETURNING
+                        retries_remaining
+                "
+            } else {
+                r"
+                    UPDATE notification_alerts
+                    SET
+                        delivery_status = 'FAILED',
+                        retries_remaining = retries_remaining - 1,
+                        finished_at = NOW() AT TIME ZONE 'UTC'
+                    WHERE
+                        id = $1
+                    RETURNING
+                        retries_remaining
+                "
+            };
+
+            let row = sqlx::query(sql).bind(alert.id).fetch_one(&mut tx).await?;
+            let retries_remaining: i32 = row.get("retries_remaining");
+
+            if retries_remaining > 0 {
+                tracing::debug!(
+                    retries_remaining = retries_remaining,
+                    alert_id = alert.id,
+                    "will retry sending alert"
+                );
+            } else {
+                tracing::debug!(
+                    alert_id = alert.id,
+                    "exceeded max_retries, giving up sending alert"
+                );
+            }
+        }
+
+        tx.commit().await?;
+
+        Ok(sent_alerts)
+    }
+
     async fn read_one_internal(
         &self,
         conn: &mut DbConnection,
@@ -286,7 +403,20 @@ fn check_uuid_eq(check_uuid: &Uuid) -> SelectStatement {
         .take()
 }
 
-#[derive(sqlx::Type)]
+#[derive(sqlx::FromRow, Debug)]
+pub struct NotificationAlert {
+    pub id: i64,
+    pub check_uuid: Uuid,
+    pub notification_type: NotificationType,
+    pub name: String,
+    pub email: Option<String>,
+    pub url: Option<String>,
+    pub retries_remaining: i32,
+    pub max_retries: i32,
+    pub last_ping_at: Option<NaiveDateTime>,
+}
+
+#[derive(sqlx::Type, Debug)]
 #[sqlx(type_name = "notification_type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NotificationType {
     Email,

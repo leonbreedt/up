@@ -110,12 +110,13 @@ CREATE TABLE IF NOT EXISTS notifications (
     CONSTRAINT notifications_unique_shortid UNIQUE (shortid)
 );
 
-CREATE TYPE alert_delivery_status AS ENUM ('PENDING', 'DELIVERED', 'FAILED');
+CREATE TYPE alert_delivery_status AS ENUM ('QUEUED', 'RUNNING', 'DELIVERED', 'FAILED');
 
 CREATE TABLE IF NOT EXISTS notification_alerts (
+    id                  BIGSERIAL PRIMARY KEY,
     notification_id     BIGINT NOT NULL REFERENCES notifications (id),
     check_status        check_status NOT NULL,
-    delivery_status     alert_delivery_status NOT NULL DEFAULT 'PENDING',
+    delivery_status     alert_delivery_status NOT NULL DEFAULT 'QUEUED',
     retries_remaining   INTEGER NOT NULL,
     created_at          TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
     finished_at         TIMESTAMP WITHOUT TIME ZONE
