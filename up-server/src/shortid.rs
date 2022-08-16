@@ -1,34 +1,31 @@
 use std::str::FromStr;
 
-use harsh::Harsh;
-use lazy_static::lazy_static;
 use miette::Diagnostic;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
+use ulid::Ulid;
 use uuid::Uuid;
 
-lazy_static! {
-    static ref HARSH: Harsh = Harsh::builder().salt("io.sector42.up").build().unwrap();
-}
-
 #[derive(Debug, Clone, Copy)]
-pub struct ShortId(Uuid);
+pub struct ShortId(Ulid, Uuid);
 
 impl ShortId {
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        let uuid: Uuid = Uuid::new_v4();
+        let id: Ulid = uuid.into();
+        Self(id, uuid)
     }
 
     pub fn from_uuid(id: &Uuid) -> Self {
-        id.into()
+        Self(id.as_u128().into(), id.clone())
     }
 
     pub fn as_uuid(&self) -> &Uuid {
-        &self.0
+        &self.1
     }
 
     pub fn into_uuid(self) -> Uuid {
-        self.0
+        self.1
     }
 }
 
@@ -40,25 +37,25 @@ impl Default for ShortId {
 
 impl From<Uuid> for ShortId {
     fn from(id: Uuid) -> Self {
-        Self(id)
+        Self::from_uuid(&id)
     }
 }
 
 impl From<&Uuid> for ShortId {
     fn from(id: &Uuid) -> Self {
-        Self(*id)
+        Self::from_uuid(id)
     }
 }
 
 impl From<ShortId> for Uuid {
     fn from(id: ShortId) -> Self {
-        id.0
+        id.1
     }
 }
 
 impl From<&ShortId> for Uuid {
     fn from(id: &ShortId) -> Self {
-        id.0
+        id.1.clone()
     }
 }
 
@@ -72,21 +69,14 @@ impl FromStr for ShortId {
     type Err = ParseShortIdError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let decoded = HARSH
-            .decode(s)
-            .map_err(|_| ParseShortIdError::DecodeFailure)?;
-        Ok(Self(Uuid::from_u128(
-            decoded[0] as u128 | ((decoded[1] as u128) << 64),
-        )))
+        let ulid: Ulid = s.parse().map_err(|_| ParseShortIdError::DecodeFailure)?;
+        Ok(Self(ulid, ulid.into()))
     }
 }
 
 impl ToString for ShortId {
     fn to_string(&self) -> String {
-        let n = self.0.as_u128();
-        let hi = (n >> 64) as u64;
-        let lo = n as u64;
-        HARSH.encode(&[lo, hi])
+        self.0.to_string()
     }
 }
 
@@ -134,11 +124,19 @@ mod test {
 
         let value = id.to_string();
 
-        assert_eq!("574wP6790o0E5hVakwJbk2mX7L", value);
+        assert_eq!("2T7CVM6KSJ9YV8T303QHWKZXWX", value);
 
         let parsed_id: ShortId = value.parse().unwrap();
 
         assert_eq!(id, parsed_id);
+    }
+
+    #[test]
+    pub fn subsequent_different() {
+        let id1 = ShortId::new();
+        let id2 = ShortId::new();
+
+        assert_ne!(id1, id2);
     }
 
     #[test]
@@ -156,12 +154,12 @@ mod test {
             .into();
 
         assert_eq!(
-            "\"3VD6meanalQYGibQWDYXXqgw\"",
+            "\"00394JKKAE8WCR4B2ES3Z8WX1V\"",
             serde_json::to_string(&id).unwrap()
         );
         assert_eq!(
             id,
-            serde_json::from_str("\"3VD6meanalQYGibQWDYXXqgw\"").unwrap()
+            serde_json::from_str("\"00394JKKAE8WCR4B2ES3Z8WX1V\"").unwrap()
         );
     }
 }

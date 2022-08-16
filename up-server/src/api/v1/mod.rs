@@ -39,7 +39,7 @@ pub fn router() -> Router {
             get(checks::read_one_notification),
         )
         .route(
-            "/api/v1/checks/:id/notifications/:notification_id",
+            "/api/v1/checks/:id/notifications",
             post(checks::create_notification),
         )
         .route(

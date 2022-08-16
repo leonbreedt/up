@@ -85,9 +85,13 @@ impl NotificationRepository {
         }
 
         let check_id = self.check.get_id(&mut tx, check_uuid).await?;
+        let uuid = Uuid::new_v4();
+        let short_id: ShortId = uuid.into();
 
         let mut values = values.clone();
         values.insert(0, column_value(Field::CheckId, check_id));
+        values.insert(0, column_value(Field::Uuid, uuid));
+        values.insert(0, column_value(Field::ShortId, short_id));
 
         let columns: Vec<Field> = values.iter().map(|v| *v.field()).collect();
         let exprs: Vec<SimpleExpr> = values.iter().map(|v| v.as_expr()).collect();
@@ -323,6 +327,7 @@ pub enum Field {
     Id,
     CheckId,
     Uuid,
+    ShortId,
     Name,
     NotificationType,
     Email,
@@ -361,6 +366,7 @@ lazy_static! {
         (Field::Id.to_string(), Field::Id),
         (Field::CheckId.to_string(), Field::CheckId),
         (Field::Uuid.to_string(), Field::Uuid),
+        (Field::ShortId.to_string(), Field::ShortId),
         (Field::Name.to_string(), Field::Name),
         (Field::NotificationType.to_string(), Field::NotificationType),
         (Field::Email.to_string(), Field::Email),
@@ -385,6 +391,7 @@ impl AsRef<str> for Field {
             Self::Id => "id",
             Self::CheckId => "check_id",
             Self::Uuid => "uuid",
+            Self::ShortId => "shortid",
             Self::Name => "name",
             Self::NotificationType => "notification_type",
             Self::Email => "email",

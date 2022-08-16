@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     id                          BIGSERIAL PRIMARY KEY,
     check_id                    BIGINT NOT NULL REFERENCES checks (id),
     uuid                        UUID NOT NULL DEFAULT gen_random_uuid(),
+    shortid                     TEXT NOT NULL,
     name                        TEXT NOT NULL DEFAULT '',
     notification_type           notification_type NOT NULL,
     email                       TEXT,
@@ -105,7 +106,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     deleted                     BOOLEAN NOT NULL DEFAULT false,
     deleted_at                  TIMESTAMP WITHOUT TIME ZONE,
 
-    CONSTRAINT notifications_unique_uuid UNIQUE (uuid)
+    CONSTRAINT notifications_unique_uuid UNIQUE (uuid),
+    CONSTRAINT notifications_unique_shortid UNIQUE (shortid)
 );
 
 CREATE TYPE alert_delivery_status AS ENUM ('PENDING', 'DELIVERED', 'FAILED');
