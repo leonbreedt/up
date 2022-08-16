@@ -7,7 +7,6 @@ use std::{fmt::Debug, hash::Hash, str::FromStr};
 
 use miette::Diagnostic;
 use sea_query::{Expr, QueryBuilder, SimpleExpr, Value};
-use sqlx::{Row, ValueRef};
 use thiserror::Error;
 
 mod account;
@@ -28,13 +27,16 @@ use check::CheckRepository;
 use notification::NotificationRepository;
 use project::ProjectRepository;
 
-use crate::database::{Database, DbQueryBuilder, DbRow, DbType};
+use crate::database::{Database, DbQueryBuilder};
 
 type Result<T> = miette::Result<T, RepositoryError>;
 
 /// Represents a field in a DTO (can be used in queries, parse from
 /// strings, converted to strings, and used as map keys).
-pub trait ModelField: Debug + Clone + Hash + PartialEq + Eq + FromStr + AsRef<str> {}
+pub trait ModelField: Debug + Clone + Hash + PartialEq + Eq + FromStr + AsRef<str> {
+    fn all() -> &'static [Self];
+    fn updatable() -> &'static [Self];
+}
 
 #[derive(Clone)]
 pub struct Repository {
@@ -78,35 +80,11 @@ impl Repository {
     pub fn check(&self) -> &CheckRepository {
         &self.check
     }
-
     pub fn project(&self) -> &ProjectRepository {
         &self.project
     }
-
     pub fn notification(&self) -> &NotificationRepository {
         &self.notification
-    }
-}
-
-pub(crate) fn maybe_field_value<'r, F, V>(
-    row: &'r DbRow,
-    selection: &[F],
-    field: &F,
-) -> Result<Option<V>>
-where
-    F: ModelField,
-    V: sqlx::Decode<'r, DbType> + sqlx::Type<DbType>,
-{
-    if selection.contains(field) {
-        let index = field.as_ref();
-        let value_ref = row.try_get_raw(index)?;
-        if value_ref.is_null() {
-            Ok(None)
-        } else {
-            Ok(Some(row.try_get(index)?))
-        }
-    } else {
-        Ok(None)
     }
 }
 
@@ -118,6 +96,14 @@ pub enum QueryValue<T: ModelField> {
 }
 
 impl<T: ModelField> QueryValue<T> {
+    pub fn value<V: Into<Value>>(field: T, value: V) -> Self {
+        Self::Value(field, value.into())
+    }
+
+    pub fn expr<E: Into<SimpleExpr>>(field: T, value: E) -> Self {
+        Self::Expression(field, value.into())
+    }
+
     pub fn field(&self) -> &T {
         match self {
             Self::Value(f, _) => f,
@@ -125,11 +111,28 @@ impl<T: ModelField> QueryValue<T> {
         }
     }
 
-    pub fn as_expr(&self) -> SimpleExpr {
+    pub fn to_expr(&self) -> SimpleExpr {
         match self {
             Self::Value(_, v) => Expr::value(v.clone()),
             Self::Expression(_, e) => e.clone(),
         }
+    }
+
+    pub fn to_value(&self) -> Value {
+        match self {
+            Self::Value(_, v) => v.clone(),
+            Self::Expression(_, e) => match e {
+                SimpleExpr::Value(v) => v.clone(),
+                _ => panic!("not a single Value expression"),
+            },
+        }
+    }
+}
+
+// Support being used by .values() of query builders.
+impl<T: ModelField> From<QueryValue<T>> for (T, Value) {
+    fn from(v: QueryValue<T>) -> Self {
+        (v.field().clone(), v.to_value())
     }
 }
 
@@ -142,18 +145,9 @@ impl<T: ModelField> ToString for QueryValue<T> {
     }
 }
 
-pub fn column_value<F, V>(field: F, value: V) -> QueryValue<F>
-where
-    F: ModelField,
-    V: Into<Value>,
-{
-    QueryValue::Value(field, value.into())
-}
-
-pub fn column_expression<F, E>(field: F, value: E) -> QueryValue<F>
-where
-    F: ModelField,
-    E: Into<SimpleExpr>,
-{
-    QueryValue::Expression(field, value.into())
+pub fn updatable_values<T: ModelField + 'static>(values: Vec<QueryValue<T>>) -> Vec<QueryValue<T>> {
+    values
+        .into_iter()
+        .filter(|v| T::updatable().contains(v.field()))
+        .collect()
 }

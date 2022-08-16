@@ -1,20 +1,16 @@
-use std::{collections::HashMap, fmt::Debug, fmt::Write as _, hash::Hash, str::FromStr};
+use std::{collections::HashMap, fmt::Debug, hash::Hash, str::FromStr};
 
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use chrono::{NaiveDateTime, Utc};
 use lazy_static::lazy_static;
-use sea_query::{
-    Expr, Iden, InsertStatement, Query, QueryBuilder, SelectStatement, UpdateStatement,
-};
-use sqlx::Row;
-use tracing::Level;
+use sea_query::{Expr, Iden, Query};
 use uuid::Uuid;
 
-use super::{bind_query, maybe_field_value};
-use crate::database::DbConnection;
-use crate::repository::account::AccountRepository;
+use super::{bind_query, bind_query_as};
 use crate::{
-    database::{Database, DbQueryBuilder, DbRow},
-    repository::{RepositoryError, Result},
+    database::{Database, DbConnection, DbQueryBuilder},
+    repository::{
+        account::AccountRepository, updatable_values, QueryValue, RepositoryError, Result,
+    },
     shortid::ShortId,
 };
 
@@ -34,49 +30,93 @@ impl ProjectRepository {
     }
 
     pub async fn get_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
-        let (sql, params) = queries::read_statement(&[Field::Id])
+        let (sql, values) = Query::select()
+            .from(Field::Table)
+            .columns(vec![Field::Id])
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
+            .and_where(Expr::col(Field::Deleted).eq(false))
             .build(DbQueryBuilder::default());
-        let row = bind_query(sqlx::query(&sql), &params)
+
+        bind_query_as(sqlx::query_as(&sql), &values)
             .fetch_optional(&mut *conn)
-            .await?;
-        if let Some(row) = row {
-            Ok(row.try_get("id")?)
-        } else {
-            Err(RepositoryError::NotFound {
+            .await?
+            .map(|row: (i64,)| row.0)
+            .ok_or(RepositoryError::NotFound {
                 entity_type: ENTITY_PROJECT.to_string(),
                 id: ShortId::from_uuid(uuid).to_string(),
             })
-        }
     }
 
-    pub async fn read_one(&self, select_fields: &[Field], uuid: &Uuid) -> Result<Project> {
+    pub async fn read_one(&self, uuid: &Uuid) -> Result<Project> {
         let mut conn = self.database.connection().await?;
-        queries::read_one(&mut conn, select_fields, uuid).await
+
+        let (sql, _) = Query::select()
+            .from(Field::Table)
+            .columns(vec![Field::Id])
+            .and_where(Expr::col(Field::Uuid).eq(*uuid))
+            .and_where(Expr::col(Field::Deleted).eq(false))
+            .build(DbQueryBuilder::default());
+
+        sqlx::query_as(&sql)
+            .fetch_optional(&mut *conn)
+            .await?
+            .ok_or_else(|| RepositoryError::NotFound {
+                entity_type: ENTITY_PROJECT.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            })
     }
 
-    pub async fn read_all(&self, select_fields: &[Field]) -> Result<Vec<Project>> {
+    pub async fn read_all(&self) -> Result<Vec<Project>> {
         let mut conn = self.database.connection().await?;
-        queries::read_all(&mut conn, select_fields).await
+
+        let (sql, _) = Query::select()
+            .from(Field::Table)
+            .columns(vec![Field::Id])
+            .and_where(Expr::col(Field::Deleted).eq(false))
+            .build(DbQueryBuilder::default());
+
+        Ok(sqlx::query_as(&sql).fetch_all(&mut *conn).await?)
     }
 
-    pub async fn create(
-        &self,
-        select_fields: &[Field],
-        account_uuid: &Uuid,
-        name: &str,
-    ) -> Result<Project> {
+    pub async fn create(&self, account_uuid: &Uuid, name: &str) -> Result<Project> {
         let mut tx = self.database.transaction().await?;
 
         let account_id = self.account.get_id(&mut tx, account_uuid).await?;
-        let project = queries::insert(&mut tx, select_fields, account_id, name).await?;
-        let uuid = project.uuid.as_ref().unwrap();
+
+        let now = Utc::now();
+        let id = Uuid::new_v4();
+        let short_id: ShortId = id.into();
+
+        let (sql, params) = Query::insert()
+            .into_table(Field::Table)
+            .columns([
+                Field::AccountId,
+                Field::Uuid,
+                Field::ShortId,
+                Field::Name,
+                Field::CreatedAt,
+                Field::UpdatedAt,
+            ])
+            .values(vec![
+                account_id.into(),
+                id.into(),
+                short_id.into(),
+                name.into(),
+                now.into(),
+                now.into(),
+            ])?
+            .returning(Query::returning().columns(Field::all().to_vec()))
+            .build(DbQueryBuilder::default());
+
+        let project: Project = bind_query_as(sqlx::query_as(&sql), &params)
+            .fetch_one(&mut tx)
+            .await?;
 
         tx.commit().await?;
 
         tracing::trace!(
             account_uuid = account_uuid.to_string(),
-            uuid = uuid.to_string(),
+            uuid = id.to_string(),
             name = name,
             "project created"
         );
@@ -84,47 +124,65 @@ impl ProjectRepository {
         Ok(project)
     }
 
-    pub async fn update(
-        &self,
-        uuid: &Uuid,
-        select_fields: &[Field],
-        update_fields: Vec<(Field, sea_query::Value)>,
-    ) -> Result<(bool, Project)> {
+    pub async fn update(&self, uuid: &Uuid, values: Vec<QueryValue<Field>>) -> Result<Project> {
         let mut tx = self.database.transaction().await?;
 
-        let (updated, check) = queries::update(&mut tx, uuid, select_fields, update_fields).await?;
+        let mut values = updatable_values(values);
+        values.insert(0, QueryValue::value(Field::UpdatedAt, Utc::now()));
+        let values: Vec<(Field, sea_query::Value)> = values.into_iter().map(|v| v.into()).collect();
+
+        let (sql, params) = Query::update()
+            .values(values)
+            .and_where(Expr::col(Field::Uuid).eq(*uuid))
+            .and_where(Expr::col(Field::Deleted).eq(false))
+            .returning(Query::returning().columns(Field::all().to_vec()))
+            .build(DbQueryBuilder::default());
+
+        let project = bind_query_as(sqlx::query_as(&sql), &params)
+            .fetch_one(&mut tx)
+            .await?;
 
         tx.commit().await?;
 
-        if updated {
-            tracing::trace!(uuid = uuid.to_string(), "project updated");
-        } else {
-            tracing::trace!(uuid = uuid.to_string(), "no change, project not updated");
-        }
+        tracing::trace!(uuid = uuid.to_string(), "project updated");
 
-        Ok((updated, check))
+        Ok(project)
     }
 
     pub async fn delete(&self, uuid: &Uuid) -> Result<bool> {
         let mut tx = self.database.transaction().await?;
 
-        let deleted = queries::delete(&mut tx, uuid).await?;
+        let (sql, params) = Query::update()
+            .values(vec![
+                (Field::Deleted, true.into()),
+                (Field::DeletedAt, Utc::now().into()),
+            ])
+            .and_where(Expr::col(Field::Uuid).eq(*uuid))
+            .returning(Query::returning().columns(Field::all().to_vec()))
+            .build(DbQueryBuilder::default());
 
-        tx.commit().await?;
+        let deleted = bind_query(sqlx::query(&sql), &params)
+            .execute(&mut tx)
+            .await?
+            .rows_affected()
+            > 0;
 
         if deleted {
             tracing::trace!(uuid = uuid.to_string(), "project deleted");
+        } else {
+            tracing::trace!(uuid = uuid.to_string(), "no such project");
         }
 
         Ok(deleted)
     }
 }
 
+#[derive(sqlx::FromRow)]
 pub struct Project {
-    pub uuid: Option<Uuid>,
-    pub name: Option<String>,
-    pub created_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub uuid: Uuid,
+    pub name: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -141,17 +199,15 @@ pub enum Field {
     DeletedAt,
 }
 
-impl Field {
-    pub fn all() -> &'static [Field] {
+impl ModelField for Field {
+    fn all() -> &'static [Field] {
         &ALL_FIELDS
     }
 
-    pub fn updatable() -> &'static [Field] {
+    fn updatable() -> &'static [Self] {
         &[Field::Name, Field::AccountId]
     }
 }
-
-impl ModelField for Field {}
 
 impl Iden for Field {
     fn unquoted(&self, s: &mut dyn std::fmt::Write) {
@@ -202,219 +258,5 @@ impl FromStr for Field {
         } else {
             anyhow::bail!("unsupported Project variant '{}'", value);
         }
-    }
-}
-
-mod queries {
-    use super::*;
-    use crate::database::DbConnection;
-
-    pub async fn read_one(
-        conn: &mut DbConnection,
-        select_fields: &[Field],
-        uuid: &Uuid,
-    ) -> Result<Project> {
-        tracing::trace!(
-            select = format!("{:?}", select_fields),
-            uuid = uuid.to_string(),
-            "reading project"
-        );
-
-        let (sql, params) = read_statement(select_fields)
-            .and_where(Expr::col(Field::Uuid).eq(*uuid))
-            .build(DbQueryBuilder::default());
-
-        bind_query(sqlx::query(&sql), &params)
-            .fetch_optional(&mut *conn)
-            .await?
-            .map(|row| from_row(&row, select_fields))
-            .ok_or_else(|| RepositoryError::NotFound {
-                entity_type: ENTITY_PROJECT.to_string(),
-                id: ShortId::from_uuid(uuid).to_string(),
-            })?
-    }
-
-    pub async fn read_all(
-        conn: &mut DbConnection,
-        select_fields: &[Field],
-    ) -> Result<Vec<Project>> {
-        tracing::trace!(
-            select = format!("{:?}", select_fields),
-            "reading all projects"
-        );
-
-        let (sql, params) = read_statement(select_fields).build(DbQueryBuilder::default());
-
-        bind_query(sqlx::query(&sql), &params)
-            .fetch_all(&mut *conn)
-            .await?
-            .into_iter()
-            .map(|row| from_row(&row, select_fields))
-            .collect()
-    }
-
-    pub async fn insert(
-        conn: &mut DbConnection,
-        select_fields: &[Field],
-        account_id: i64,
-        name: &str,
-    ) -> Result<Project> {
-        tracing::trace!(
-            select = format!("{:?}", select_fields),
-            account_id = account_id.to_string(),
-            name = name,
-            "creating project"
-        );
-
-        let (sql, params) =
-            insert_statement(select_fields, account_id, name)?.build(DbQueryBuilder::default());
-
-        let row = bind_query(sqlx::query(&sql), &params)
-            .fetch_one(&mut *conn)
-            .await?;
-        let issue = from_row(&row, select_fields)?;
-
-        Ok(issue)
-    }
-
-    pub async fn update(
-        conn: &mut DbConnection,
-        uuid: &Uuid,
-        select_fields: &[Field],
-        update_fields: Vec<(Field, sea_query::Value)>,
-    ) -> Result<(bool, Project)> {
-        let update_params: Vec<(Field, sea_query::Value)> = update_fields
-            .into_iter()
-            .filter(|i| Field::updatable().contains(&i.0))
-            .collect();
-
-        let query_builder = DbQueryBuilder::default();
-
-        if tracing::event_enabled!(Level::TRACE) {
-            let mut fields_to_update = String::from("[");
-            for field in update_params.iter() {
-                let _ = write!(
-                    fields_to_update,
-                    "{}={}",
-                    field.0.as_ref(),
-                    query_builder.value_to_string(&field.1)
-                );
-            }
-            fields_to_update.push(']');
-            tracing::trace!(
-                uuid = uuid.to_string(),
-                fields = fields_to_update,
-                "updating check"
-            );
-        }
-
-        let mut updated = false;
-        if !update_params.is_empty() {
-            let (sql, params) = update_statement(&update_params)
-                .and_where(Expr::col(Field::Uuid).eq(*uuid))
-                .and_where(Expr::col(Field::Deleted).eq(false))
-                .build(query_builder);
-
-            let rows_updated = bind_query(sqlx::query(&sql), &params)
-                .execute(&mut *conn)
-                .await?
-                .rows_affected();
-
-            updated = rows_updated > 0
-        }
-
-        let check = read_one(&mut *conn, select_fields, uuid).await?;
-        Ok((updated, check))
-    }
-
-    pub async fn delete(conn: &mut DbConnection, uuid: &Uuid) -> Result<bool> {
-        tracing::trace!(uuid = uuid.to_string(), "deleting project");
-
-        let (sql, params) = update_statement(&[
-            (Field::Deleted, true.into()),
-            (Field::DeletedAt, Utc::now().into()),
-        ])
-        .and_where(Expr::col(Field::Uuid).eq(*uuid))
-        .build(DbQueryBuilder::default());
-
-        let rows_deleted = bind_query(sqlx::query(&sql), &params)
-            .execute(&mut *conn)
-            .await?
-            .rows_affected();
-
-        Ok(rows_deleted > 0)
-    }
-
-    pub fn read_statement(selected_fields: &[Field]) -> SelectStatement {
-        let mut statement = Query::select();
-
-        statement
-            .from(Field::Table)
-            .columns(selected_fields.to_vec())
-            .and_where(Expr::col(Field::Deleted).eq(false));
-
-        statement
-    }
-
-    fn insert_statement(
-        select_fields: &[Field],
-        account_id: i64,
-        name: &str,
-    ) -> Result<InsertStatement> {
-        let mut statement = Query::insert();
-
-        let now = Utc::now();
-        let id = Uuid::new_v4();
-        let short_id: ShortId = id.into();
-
-        statement
-            .into_table(Field::Table)
-            .columns([
-                Field::AccountId,
-                Field::Uuid,
-                Field::ShortId,
-                Field::Name,
-                Field::CreatedAt,
-                Field::UpdatedAt,
-            ])
-            .values(vec![
-                account_id.into(),
-                id.into(),
-                short_id.into(),
-                name.into(),
-                now.into(),
-                now.into(),
-            ])?
-            .returning(Query::returning().columns(select_fields.to_vec()));
-
-        Ok(statement)
-    }
-
-    fn update_statement(values: &[(Field, sea_query::Value)]) -> UpdateStatement {
-        let mut statement = Query::update();
-
-        let mut values = values.to_vec();
-        values.push((Field::UpdatedAt, Utc::now().into()));
-
-        statement
-            .table(Field::Table)
-            .values(values)
-            .and_where(Expr::col(Field::Deleted).eq(false));
-
-        statement
-    }
-
-    fn from_row(row: &DbRow, select_fields: &[Field]) -> Result<Project> {
-        let created_at: Option<NaiveDateTime> =
-            maybe_field_value(row, select_fields, &Field::CreatedAt)?;
-        let updated_at: Option<NaiveDateTime> =
-            maybe_field_value(row, select_fields, &Field::UpdatedAt)?;
-        let uuid: Option<Uuid> = maybe_field_value(row, select_fields, &Field::Uuid)?;
-        Ok(Project {
-            uuid,
-            name: maybe_field_value(row, select_fields, &Field::Name)?,
-            created_at: created_at.map(|v| Utc.from_utc_datetime(&v)),
-            updated_at: updated_at.map(|v| Utc.from_utc_datetime(&v)),
-        })
     }
 }

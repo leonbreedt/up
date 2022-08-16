@@ -12,9 +12,7 @@ use super::{bind_query, bind_query_as, ModelField};
 use crate::{
     database::{Database, DbConnection, DbQueryBuilder},
     notifier::Notifier,
-    repository::{
-        check::CheckRepository, column_value, dto::CheckField, QueryValue, RepositoryError, Result,
-    },
+    repository::{check::CheckRepository, dto::CheckField, QueryValue, RepositoryError, Result},
     shortid::ShortId,
 };
 
@@ -90,12 +88,12 @@ impl NotificationRepository {
         let short_id: ShortId = uuid.into();
 
         let mut values = values.clone();
-        values.insert(0, column_value(Field::CheckId, check_id));
-        values.insert(0, column_value(Field::Uuid, uuid));
-        values.insert(0, column_value(Field::ShortId, short_id));
+        values.insert(0, QueryValue::value(Field::CheckId, check_id));
+        values.insert(0, QueryValue::value(Field::Uuid, uuid));
+        values.insert(0, QueryValue::value(Field::ShortId, short_id));
 
         let columns: Vec<Field> = values.iter().map(|v| *v.field()).collect();
-        let exprs: Vec<SimpleExpr> = values.iter().map(|v| v.as_expr()).collect();
+        let exprs: Vec<SimpleExpr> = values.iter().map(|v| v.to_expr()).collect();
 
         let (sql, params) = Query::insert()
             .into_table(Field::Table)
@@ -475,22 +473,6 @@ impl Iden for Field {
     }
 }
 
-impl Field {
-    pub fn all() -> &'static [Field] {
-        &ALL_FIELDS
-    }
-
-    pub fn updatable() -> &'static [Field] {
-        &[
-            Field::Name,
-            Field::NotificationType,
-            Field::Email,
-            Field::Url,
-            Field::MaxRetries,
-        ]
-    }
-}
-
 lazy_static! {
     static ref NAME_TO_FIELD: HashMap<String, Field> = vec![
         (Field::Id.to_string(), Field::Id),
@@ -512,7 +494,21 @@ lazy_static! {
     static ref ALL_FIELDS: Vec<Field> = NAME_TO_FIELD.values().cloned().collect();
 }
 
-impl ModelField for Field {}
+impl ModelField for Field {
+    fn all() -> &'static [Field] {
+        &ALL_FIELDS
+    }
+
+    fn updatable() -> &'static [Field] {
+        &[
+            Field::Name,
+            Field::NotificationType,
+            Field::Email,
+            Field::Url,
+            Field::MaxRetries,
+        ]
+    }
+}
 
 impl AsRef<str> for Field {
     fn as_ref(&self) -> &str {

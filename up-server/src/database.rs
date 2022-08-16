@@ -12,7 +12,6 @@ pub type DbPoolConnection = PoolConnection<DbType>;
 pub type DbPoolOptions = sqlx::postgres::PgPoolOptions;
 pub type DbTransaction<'t> = sqlx::Transaction<'t, DbType>;
 pub type DbQueryBuilder = sea_query::PostgresQueryBuilder;
-pub type DbRow = sqlx::postgres::PgRow;
 
 const SLOW_STATEMENT_THRESHOLD_MS: Duration = Duration::from_millis(5000);
 static MIGRATOR: Migrator = sqlx::migrate!();

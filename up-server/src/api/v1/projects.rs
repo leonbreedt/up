@@ -1,10 +1,11 @@
 use axum::body::Empty;
 use axum::response::IntoResponse;
 use axum::{extract::Path, Extension};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::repository::QueryValue;
 use crate::{
     api::{v1::ApiError, Json},
     repository::{dto, Repository},
@@ -16,11 +17,7 @@ pub async fn read_one(
     Path(id): Path<ShortId>,
     repository: Extension<Repository>,
 ) -> Result<Json<Project>, ApiError> {
-    let project: Project = repository
-        .project()
-        .read_one(dto::ProjectField::all(), id.as_uuid())
-        .await?
-        .into();
+    let project: Project = repository.project().read_one(id.as_uuid()).await?.into();
     Ok(project.into())
 }
 
@@ -30,7 +27,7 @@ pub async fn read_all(
 ) -> Result<Json<Vec<Project>>, ApiError> {
     let projects: Vec<Project> = repository
         .project()
-        .read_all(dto::ProjectField::all())
+        .read_all()
         .await?
         .into_iter()
         .map(|i| i.into())
@@ -45,11 +42,7 @@ pub async fn create(
 ) -> Result<Json<Project>, ApiError> {
     let project = repository
         .project()
-        .create(
-            dto::ProjectField::all(),
-            request.account_id.as_uuid(),
-            &request.name,
-        )
+        .create(request.account_id.as_uuid(), &request.name)
         .await?;
     let project: Project = project.into();
     Ok(project.into())
@@ -63,11 +56,11 @@ pub async fn update(
 ) -> Result<Json<Project>, ApiError> {
     let mut update_fields = Vec::new();
     if let Some(name) = &request.name {
-        update_fields.push((dto::ProjectField::Name, name.as_str().into()));
+        update_fields.push(QueryValue::value(dto::ProjectField::Name, name.as_str()));
     }
-    let (_, project) = repository
+    let project = repository
         .project()
-        .update(id.as_uuid(), dto::ProjectField::all(), update_fields)
+        .update(id.as_uuid(), update_fields)
         .await?;
     let project: Project = project.into();
     Ok(project.into())
@@ -115,10 +108,10 @@ pub struct UpdateProject {
 impl From<dto::Project> for Project {
     fn from(issue: dto::Project) -> Self {
         Self {
-            id: issue.uuid.unwrap().into(),
-            name: issue.name.unwrap(),
-            created_at: issue.created_at.unwrap(),
-            updated_at: issue.updated_at,
+            id: issue.uuid.into(),
+            name: issue.name,
+            created_at: Utc.from_utc_datetime(&issue.created_at),
+            updated_at: issue.updated_at.map(|dt| Utc.from_utc_datetime(&dt)),
         }
     }
 }

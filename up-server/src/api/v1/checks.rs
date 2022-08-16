@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::{v1::ApiError, Json},
-    repository::{column_expression, column_value, dto, QueryValue, Repository},
+    repository::{dto, QueryValue, Repository},
     shortid::ShortId,
 };
 
@@ -314,21 +314,21 @@ impl CreateNotification {
     pub fn values(&self) -> Vec<QueryValue<dto::NotificationField>> {
         let mut values = Vec::new();
         if let Some(name) = self.name.as_deref() {
-            values.push(column_value(dto::NotificationField::Name, name));
+            values.push(QueryValue::value(dto::NotificationField::Name, name));
         }
         let notification_type: dto::NotificationType = (&self.notification_type).into();
-        values.push(column_expression(
+        values.push(QueryValue::expr(
             dto::NotificationField::NotificationType,
             notification_type,
         ));
         if let Some(email) = self.email.as_deref() {
-            values.push(column_value(dto::NotificationField::Email, email));
+            values.push(QueryValue::value(dto::NotificationField::Email, email));
         }
         if let Some(url) = self.url.as_deref() {
-            values.push(column_value(dto::NotificationField::Email, url));
+            values.push(QueryValue::value(dto::NotificationField::Email, url));
         }
         if let Some(max_retries) = self.max_retries {
-            values.push(column_value(
+            values.push(QueryValue::value(
                 dto::NotificationField::MaxRetries,
                 max_retries,
             ));
@@ -356,23 +356,23 @@ impl UpdateNotification {
     pub fn values(&self) -> Vec<QueryValue<dto::NotificationField>> {
         let mut values = Vec::new();
         if let Some(name) = self.name.as_deref() {
-            values.push(column_value(dto::NotificationField::Name, name));
+            values.push(QueryValue::value(dto::NotificationField::Name, name));
         }
         if let Some(notification_type) = &self.notification_type {
             let notification_type: dto::NotificationType = notification_type.into();
-            values.push(column_expression(
+            values.push(QueryValue::expr(
                 dto::NotificationField::NotificationType,
                 notification_type,
             ));
         }
         if let Some(email) = self.email.as_deref() {
-            values.push(column_value(dto::NotificationField::Email, email));
+            values.push(QueryValue::value(dto::NotificationField::Email, email));
         }
         if let Some(url) = self.url.as_deref() {
-            values.push(column_value(dto::NotificationField::Email, url));
+            values.push(QueryValue::value(dto::NotificationField::Email, url));
         }
         if let Some(max_retries) = self.max_retries {
-            values.push(column_value(
+            values.push(QueryValue::value(
                 dto::NotificationField::MaxRetries,
                 max_retries,
             ));

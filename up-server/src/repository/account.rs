@@ -59,7 +59,15 @@ pub enum Field {
     DeletedAt,
 }
 
-impl ModelField for Field {}
+impl ModelField for Field {
+    fn all() -> &'static [Field] {
+        &ALL_FIELDS
+    }
+
+    fn updatable() -> &'static [Field] {
+        &[]
+    }
+}
 
 impl Iden for Field {
     fn unquoted(&self, s: &mut dyn std::fmt::Write) {
@@ -90,6 +98,7 @@ lazy_static! {
     ]
     .into_iter()
     .collect();
+    static ref ALL_FIELDS: Vec<Field> = NAME_TO_FIELD.values().cloned().collect();
 }
 
 impl FromStr for Field {

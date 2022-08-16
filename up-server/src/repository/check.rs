@@ -559,26 +559,6 @@ impl Iden for Field {
     }
 }
 
-impl Field {
-    pub fn all() -> &'static [Field] {
-        &ALL_FIELDS
-    }
-
-    pub fn updatable() -> &'static [Field] {
-        &[
-            Field::Name,
-            Field::Description,
-            Field::ScheduleType,
-            Field::PingPeriod,
-            Field::PingPeriodUnits,
-            Field::PingCronExpression,
-            Field::GracePeriod,
-            Field::GracePeriodUnits,
-            Field::Status,
-        ]
-    }
-}
-
 lazy_static! {
     static ref NAME_TO_FIELD: HashMap<String, Field> = vec![
         (Field::Id.to_string(), Field::Id),
@@ -610,7 +590,25 @@ lazy_static! {
     static ref ALL_FIELDS: Vec<Field> = NAME_TO_FIELD.values().cloned().collect();
 }
 
-impl ModelField for Field {}
+impl ModelField for Field {
+    fn all() -> &'static [Field] {
+        &ALL_FIELDS
+    }
+
+    fn updatable() -> &'static [Field] {
+        &[
+            Field::Name,
+            Field::Description,
+            Field::ScheduleType,
+            Field::PingPeriod,
+            Field::PingPeriodUnits,
+            Field::PingCronExpression,
+            Field::GracePeriod,
+            Field::GracePeriodUnits,
+            Field::Status,
+        ]
+    }
+}
 
 impl AsRef<str> for Field {
     fn as_ref(&self) -> &str {
