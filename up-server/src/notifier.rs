@@ -71,11 +71,13 @@ impl Notifier {
             "sending alert",
         );
 
-        let mut email = SendEmailRequest::default();
-        email.from = "up.io <no-reply@sector42.io>".to_string();
-        email.to = alert_email.to_string();
-        email.subject = Some(format!("[DOWN] {}", alert.name));
-        email.body = Body::Text(String::from("Sent by up.io"));
+        let email = SendEmailRequest {
+            from: "up.io <no-reply@sector42.io>".to_string(),
+            to: alert_email.to_string(),
+            subject: Some(format!("[DOWN] {}", alert.name)),
+            body: Body::Text(String::from("Sent by up.io")),
+            ..SendEmailRequest::default()
+        };
 
         self.postmark_client.send_email(&email).await?;
 

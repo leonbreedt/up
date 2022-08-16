@@ -17,7 +17,7 @@ impl ShortId {
     }
 
     pub fn from_uuid(id: &Uuid) -> Self {
-        Self(id.as_u128().into(), id.clone())
+        Self(id.as_u128().into(), *id)
     }
 
     pub fn as_uuid(&self) -> &Uuid {
@@ -55,7 +55,7 @@ impl From<ShortId> for Uuid {
 
 impl From<&ShortId> for Uuid {
     fn from(id: &ShortId) -> Self {
-        id.1.clone()
+        id.1
     }
 }
 

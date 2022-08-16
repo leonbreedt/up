@@ -144,7 +144,7 @@ impl CheckRepository {
                     Expr::val(CheckStatus::Down.to_string()).as_enum(Alias::new("check_status")),
                 )
                 .and_where(Expr::col(Field::Deleted).eq(false))
-                .and_where(Expr::col(Field::Uuid).eq(check_uuid.clone()))
+                .and_where(Expr::col(Field::Uuid).eq(check_uuid))
                 .build(DbQueryBuilder::default());
 
             let rows_updated = bind_query(sqlx::query(&sql), &params)
@@ -152,7 +152,7 @@ impl CheckRepository {
                 .await?
                 .rows_affected();
 
-            if rows_updated <= 0 {
+            if rows_updated == 0 {
                 tracing::error!(
                     check_uuid = check_uuid.to_string(),
                     "failed to set status of check to DOWN, no rows updated"

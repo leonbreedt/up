@@ -397,7 +397,7 @@ fn check_uuid_eq(check_uuid: &Uuid) -> SelectStatement {
     Query::select()
         .from(CheckField::Table)
         .columns(vec![CheckField::Id])
-        .and_where(Expr::col(CheckField::Uuid).eq(check_uuid.clone()))
+        .and_where(Expr::col(CheckField::Uuid).eq(*check_uuid))
         .take()
 }
 

@@ -96,8 +96,7 @@ impl PostmarkClient {
             return Err(PostmarkError::ApiHttpError(
                 status,
                 String::from_utf8_lossy(&response_body_bytes).to_string(),
-            )
-            .into());
+            ));
         }
 
         let api_response: SendEmailResponse = serde_json::from_slice(&response_body_bytes)
@@ -117,7 +116,10 @@ impl PostmarkClient {
             }
             Ok(())
         } else {
-            Err(PostmarkError::ApiError(api_response.error_code, api_response.message).into())
+            Err(PostmarkError::ApiError(
+                api_response.error_code,
+                api_response.message,
+            ))
         }
     }
 }
