@@ -93,8 +93,7 @@ CREATE TYPE notification_type AS ENUM ('EMAIL', 'WEBHOOK');
 
 CREATE TABLE IF NOT EXISTS notifications (
     id                          BIGSERIAL PRIMARY KEY,
-    account_id                  BIGINT NOT NULL REFERENCES accounts (id),
-    project_id                  BIGINT NOT NULL REFERENCES projects (id),
+    check_id                    BIGINT NOT NULL REFERENCES checks (id),
     uuid                        UUID NOT NULL DEFAULT gen_random_uuid(),
     name                        TEXT NOT NULL DEFAULT '',
     notification_type           notification_type NOT NULL,
@@ -109,16 +108,9 @@ CREATE TABLE IF NOT EXISTS notifications (
     CONSTRAINT notifications_unique_uuid UNIQUE (uuid)
 );
 
-CREATE TABLE IF NOT EXISTS check_notifications (
-    check_id          BIGINT NOT NULL REFERENCES checks (id),
-    notification_id   BIGINT NOT NULL REFERENCES notifications (id),
-    PRIMARY KEY (check_id, notification_id)
-);
-
 CREATE TYPE alert_delivery_status AS ENUM ('PENDING', 'DELIVERED', 'FAILED');
 
 CREATE TABLE IF NOT EXISTS notification_alerts (
-    check_id            BIGINT NOT NULL REFERENCES checks (id),
     notification_id     BIGINT NOT NULL REFERENCES notifications (id),
     check_status        check_status NOT NULL,
     delivery_status     alert_delivery_status NOT NULL DEFAULT 'PENDING',

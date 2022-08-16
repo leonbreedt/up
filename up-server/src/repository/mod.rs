@@ -63,8 +63,8 @@ impl Repository {
     pub fn new(database: Database) -> Self {
         let account = AccountRepository::new(database.clone());
         let project = ProjectRepository::new(database.clone(), account.clone());
-        let check = CheckRepository::new(database.clone(), account.clone(), project.clone());
-        let notification = NotificationRepository::new(database, account, project.clone());
+        let check = CheckRepository::new(database.clone(), account, project.clone());
+        let notification = NotificationRepository::new(database, check.clone());
         Self {
             check,
             project,

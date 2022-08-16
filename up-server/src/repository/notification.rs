@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Write as _, str::FromStr};
 
 use chrono::{NaiveDateTime, Utc};
 use lazy_static::lazy_static;
-use sea_query::{Alias, Expr, Iden, Query, QueryBuilder, SimpleExpr};
+use sea_query::{Alias, Expr, Iden, Query, QueryBuilder, SelectStatement, SimpleExpr};
 use tracing::Level;
 use uuid::Uuid;
 
@@ -11,9 +11,7 @@ use super::{bind_query, bind_query_as, ModelField};
 use crate::repository::column_value;
 use crate::{
     database::{Database, DbConnection, DbQueryBuilder},
-    repository::{
-        account::AccountRepository, project::ProjectRepository, QueryValue, RepositoryError, Result,
-    },
+    repository::{check::CheckRepository, dto::CheckField, QueryValue, RepositoryError, Result},
     shortid::ShortId,
 };
 
@@ -22,30 +20,29 @@ const ENTITY_NOTIFICATION: &str = "notification";
 #[derive(Clone)]
 pub struct NotificationRepository {
     database: Database,
-    account: AccountRepository,
-    project: ProjectRepository,
+    check: CheckRepository,
 }
 
 impl NotificationRepository {}
 
 impl NotificationRepository {
-    pub fn new(database: Database, account: AccountRepository, project: ProjectRepository) -> Self {
-        Self {
-            database,
-            account,
-            project,
-        }
+    pub fn new(database: Database, check: CheckRepository) -> Self {
+        Self { database, check }
     }
 
-    pub async fn read_one(&self, uuid: &Uuid) -> Result<Notification> {
+    pub async fn read_one(&self, check_uuid: &Uuid, uuid: &Uuid) -> Result<Notification> {
         let mut conn = self.database.connection().await?;
 
-        tracing::trace!(uuid = uuid.to_string(), "reading notification");
+        tracing::trace!(
+            check_uuid = check_uuid.to_string(),
+            uuid = uuid.to_string(),
+            "reading notification"
+        );
 
-        self.read_one_internal(&mut conn, uuid).await
+        self.read_one_internal(&mut conn, check_uuid, uuid).await
     }
 
-    pub async fn read_all(&self) -> Result<Vec<Notification>> {
+    pub async fn read_all(&self, check_uuid: &Uuid) -> Result<Vec<Notification>> {
         let mut conn = self.database.connection().await?;
 
         tracing::trace!("reading all notifications");
@@ -53,6 +50,7 @@ impl NotificationRepository {
         let (sql, params) = Query::select()
             .from(Field::Table)
             .columns(Field::all().to_vec())
+            .and_where(Expr::col(Field::CheckId).in_subquery(check_uuid_eq(check_uuid)))
             .and_where(Expr::col(Field::Deleted).eq(false))
             .build(DbQueryBuilder::default());
 
@@ -65,14 +63,10 @@ impl NotificationRepository {
 
     pub async fn create(
         &self,
-        account_uuid: &Uuid,
-        project_uuid: &Uuid,
+        check_uuid: &Uuid,
         values: Vec<QueryValue<Field>>,
     ) -> Result<Notification> {
         let mut tx = self.database.transaction().await?;
-
-        let account_id = self.account.get_id(&mut tx, account_uuid).await?;
-        let project_id = self.project.get_id(&mut tx, project_uuid).await?;
 
         let mut name = String::new();
 
@@ -84,16 +78,16 @@ impl NotificationRepository {
             }
 
             tracing::trace!(
-                account_id = account_id,
-                project_id = project_id,
+                check_uuid = check_uuid.to_string(),
                 name = name,
                 "creating notification"
             );
         }
 
+        let check_id = self.check.get_id(&mut tx, check_uuid).await?;
+
         let mut values = values.clone();
-        values.insert(0, column_value(Field::AccountId, account_id));
-        values.insert(1, column_value(Field::ProjectId, project_id));
+        values.insert(0, column_value(Field::CheckId, check_id));
 
         let columns: Vec<Field> = values.iter().map(|v| *v.field()).collect();
         let exprs: Vec<SimpleExpr> = values.iter().map(|v| v.as_expr()).collect();
@@ -112,7 +106,7 @@ impl NotificationRepository {
         tx.commit().await?;
 
         tracing::trace!(
-            account_uuid = account_uuid.to_string(),
+            check_uuid = check_uuid.to_string(),
             uuid = notification.uuid.to_string(),
             name = name,
             "notification created"
@@ -123,6 +117,7 @@ impl NotificationRepository {
 
     pub async fn update(
         &self,
+        check_uuid: &Uuid,
         uuid: &Uuid,
         values: Vec<QueryValue<Field>>,
     ) -> Result<(bool, Notification)> {
@@ -164,6 +159,7 @@ impl NotificationRepository {
             }
             values_to_update.push(']');
             tracing::trace!(
+                check_uuid = check_uuid.to_string(),
                 uuid = uuid.to_string(),
                 values = values_to_update,
                 "updating notification"
@@ -184,7 +180,7 @@ impl NotificationRepository {
             }
 
             let (sql, params) = query
-                .and_where(Expr::col(Field::Deleted).eq(false))
+                .and_where(Expr::col(Field::CheckId).in_subquery(check_uuid_eq(check_uuid)))
                 .and_where(Expr::col(Field::Uuid).eq(*uuid))
                 .and_where(Expr::col(Field::Deleted).eq(false))
                 .build(query_builder);
@@ -197,14 +193,19 @@ impl NotificationRepository {
             updated = rows_updated > 0
         }
 
-        let notification = self.read_one_internal(&mut tx, uuid).await?;
+        let notification = self.read_one_internal(&mut tx, check_uuid, uuid).await?;
 
         tx.commit().await?;
 
         if updated {
-            tracing::trace!(uuid = uuid.to_string(), "notification updated");
+            tracing::trace!(
+                check_uuid = check_uuid.to_string(),
+                uuid = uuid.to_string(),
+                "notification updated"
+            );
         } else {
             tracing::trace!(
+                check_uuid = check_uuid.to_string(),
                 uuid = uuid.to_string(),
                 "no change, notification not updated"
             );
@@ -213,10 +214,14 @@ impl NotificationRepository {
         Ok((updated, notification))
     }
 
-    pub async fn delete(&self, uuid: &Uuid) -> Result<bool> {
+    pub async fn delete(&self, check_uuid: &Uuid, uuid: &Uuid) -> Result<bool> {
         let mut tx = self.database.transaction().await?;
 
-        tracing::trace!(uuid = uuid.to_string(), "deleting notification");
+        tracing::trace!(
+            check_uuid = check_uuid.to_string(),
+            uuid = uuid.to_string(),
+            "deleting notification"
+        );
 
         let (sql, params) = Query::update()
             .table(Field::Table)
@@ -224,6 +229,7 @@ impl NotificationRepository {
                 (Field::Deleted, true.into()),
                 (Field::DeletedAt, Utc::now().into()),
             ])
+            .and_where(Expr::col(Field::CheckId).in_subquery(check_uuid_eq(check_uuid)))
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .build(DbQueryBuilder::default());
 
@@ -246,12 +252,14 @@ impl NotificationRepository {
     async fn read_one_internal(
         &self,
         conn: &mut DbConnection,
+        check_uuid: &Uuid,
         uuid: &Uuid,
     ) -> Result<Notification> {
         let (sql, params) = Query::select()
             .from(Field::Table)
             .columns(Field::all().to_vec())
             .and_where(Expr::col(Field::Deleted).eq(false))
+            .and_where(Expr::col(Field::CheckId).in_subquery(check_uuid_eq(check_uuid)))
             .and_where(Expr::col(Field::Uuid).eq(*uuid))
             .build(DbQueryBuilder::default());
 
@@ -264,6 +272,14 @@ impl NotificationRepository {
             id: ShortId::from_uuid(uuid).to_string(),
         })
     }
+}
+
+fn check_uuid_eq(check_uuid: &Uuid) -> SelectStatement {
+    Query::select()
+        .from(CheckField::Table)
+        .columns(vec![CheckField::Id])
+        .and_where(Expr::col(CheckField::Uuid).eq(check_uuid.clone()))
+        .take()
 }
 
 #[derive(sqlx::Type)]
@@ -290,6 +306,7 @@ impl From<NotificationType> for SimpleExpr {
 
 #[derive(sqlx::FromRow)]
 pub struct Notification {
+    pub id: i64,
     pub uuid: Uuid,
     pub name: String,
     pub notification_type: NotificationType,
@@ -304,8 +321,7 @@ pub struct Notification {
 pub enum Field {
     Table,
     Id,
-    AccountId,
-    ProjectId,
+    CheckId,
     Uuid,
     Name,
     NotificationType,
@@ -343,8 +359,7 @@ impl Field {
 lazy_static! {
     static ref NAME_TO_FIELD: HashMap<String, Field> = vec![
         (Field::Id.to_string(), Field::Id),
-        (Field::AccountId.to_string(), Field::AccountId),
-        (Field::ProjectId.to_string(), Field::ProjectId),
+        (Field::CheckId.to_string(), Field::CheckId),
         (Field::Uuid.to_string(), Field::Uuid),
         (Field::Name.to_string(), Field::Name),
         (Field::NotificationType.to_string(), Field::NotificationType),
@@ -368,8 +383,7 @@ impl AsRef<str> for Field {
         match self {
             Self::Table => "notifications",
             Self::Id => "id",
-            Self::AccountId => "account_id",
-            Self::ProjectId => "project_id",
+            Self::CheckId => "check_id",
             Self::Uuid => "uuid",
             Self::Name => "name",
             Self::NotificationType => "notification_type",

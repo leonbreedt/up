@@ -8,6 +8,7 @@ use tracing::Level;
 use uuid::Uuid;
 
 use super::{bind_query, bind_query_as, ModelField};
+
 use crate::{
     database::{Database, DbConnection, DbQueryBuilder, DbRow},
     repository::{account::AccountRepository, project::ProjectRepository, RepositoryError, Result},
@@ -29,6 +30,25 @@ impl CheckRepository {
             database,
             account,
             project,
+        }
+    }
+
+    pub async fn get_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
+        let (sql, params) = Query::select()
+            .columns(vec![Field::Id])
+            .from(Field::Table)
+            .and_where(Expr::col(Field::Uuid).eq(*uuid))
+            .build(DbQueryBuilder::default());
+        let row = bind_query(sqlx::query(&sql), &params)
+            .fetch_optional(&mut *conn)
+            .await?;
+        if let Some(row) = row {
+            Ok(row.try_get("id")?)
+        } else {
+            Err(RepositoryError::NotFound {
+                entity_type: ENTITY_CHECK.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            })
         }
     }
 
@@ -117,23 +137,48 @@ impl CheckRepository {
         for ping_details in overdue_pings {
             let (check_id, check_uuid, check_status, check_name, last_ping_at) = ping_details;
 
+            let (sql, params) = Query::update()
+                .table(Field::Table)
+                .value_expr(
+                    Field::Status,
+                    Expr::val(CheckStatus::Down.to_string()).as_enum(Alias::new("check_status")),
+                )
+                .and_where(Expr::col(Field::Deleted).eq(false))
+                .and_where(Expr::col(Field::Uuid).eq(check_uuid.clone()))
+                .build(DbQueryBuilder::default());
+
+            let rows_updated = bind_query(sqlx::query(&sql), &params)
+                .execute(&mut tx)
+                .await?
+                .rows_affected();
+
+            if rows_updated <= 0 {
+                tracing::error!(
+                    check_uuid = check_uuid.to_string(),
+                    "failed to set status of check to DOWN, no rows updated"
+                );
+                return Err(RepositoryError::NotFound {
+                    entity_type: ENTITY_CHECK.to_string(),
+                    id: ShortId::from_uuid(&check_uuid).to_string(),
+                });
+            }
+
             let sql = r"
                 SELECT
-                    n.id,
-                    n.notification_type,
-                    n.email,
-                    n.url,
-                    n.max_retries
+                    id,
+                    notification_type,
+                    email,
+                    url,
+                    max_retries
                 FROM
-                    check_notifications cn INNER JOIN notifications n ON cn.notification_id = n.id AND cn.check_id = $1
+                    notifications
                 WHERE
-                    NOT EXISTS (
+                    check_id = $1
+                    AND NOT EXISTS (
                         SELECT 1
                         FROM notification_alerts a
                         WHERE
-                            a.check_id = cn.check_id
-                            AND
-                            a.notification_id = n.id
+                            a.notification_id = notifications.id
                     )
             ";
 
@@ -154,27 +199,24 @@ impl CheckRepository {
             {
                 let sql = r"
                 INSERT INTO notification_alerts (
-                    check_id,
-                    check_status,
                     notification_id,
+                    check_status,
                     retries_remaining
                 ) VALUES (
                     $1,
                     $2,
-                    $3,
-                    $4
+                    $3
                 );
                 ";
                 sqlx::query(sql)
-                    .bind(check_id)
-                    .bind(check_status)
                     .bind(notification_id)
+                    .bind(check_status)
                     .bind(retries_remaining)
                     .execute(&mut tx)
                     .await?;
 
                 tracing::debug!(
-                    check_id = ShortId::from(check_uuid).to_string(),
+                    check_uuid = check_uuid.to_string(),
                     name = check_name,
                     alert_type = notification_type.to_string(),
                     email = email,
@@ -449,7 +491,10 @@ pub enum PeriodUnits {
 
 #[derive(sqlx::FromRow)]
 pub struct Check {
+    pub id: i64,
     pub uuid: Uuid,
+    pub account_id: i64,
+    pub project_id: i64,
     pub ping_key: String,
     pub name: String,
     pub description: String,
@@ -495,7 +540,10 @@ impl TryFrom<DbRow> for OverdueCheck {
     fn try_from(row: DbRow) -> std::result::Result<Self, Self::Error> {
         Ok(Self {
             inner: Check {
+                id: row.try_get(Field::Id.as_ref())?,
                 uuid: row.try_get(Field::Uuid.as_ref())?,
+                account_id: row.try_get(Field::AccountId.as_ref())?,
+                project_id: row.try_get(Field::ProjectId.as_ref())?,
                 ping_key: row.try_get(Field::PingKey.as_ref())?,
                 name: row.try_get(Field::Name.as_ref())?,
                 description: row.try_get(Field::Description.as_ref())?,
