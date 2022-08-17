@@ -1,11 +1,8 @@
-use axum::body::Empty;
-use axum::response::IntoResponse;
-use axum::{extract::Path, Extension};
+use axum::{body::Empty, extract::Path, response::IntoResponse, Extension};
 use chrono::{DateTime, TimeZone, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::repository::QueryValue;
 use crate::{
     api::{v1::ApiError, Json},
     repository::{dto, Repository},
@@ -40,11 +37,7 @@ pub async fn create(
     repository: Extension<Repository>,
     request: Json<CreateProject>,
 ) -> Result<Json<Project>, ApiError> {
-    let project = repository
-        .project()
-        .create(request.account_id.as_uuid(), &request.name)
-        .await?;
-    let project: Project = project.into();
+    let project: Project = repository.project().create(request.0.into()).await?.into();
     Ok(project.into())
 }
 
@@ -54,15 +47,11 @@ pub async fn update(
     repository: Extension<Repository>,
     request: Json<UpdateProject>,
 ) -> Result<Json<Project>, ApiError> {
-    let mut update_fields = Vec::new();
-    if let Some(name) = &request.name {
-        update_fields.push(QueryValue::value(dto::ProjectField::Name, name.as_str()));
-    }
-    let project = repository
+    let project: Project = repository
         .project()
-        .update(id.as_uuid(), update_fields)
-        .await?;
-    let project: Project = project.into();
+        .update(id.as_uuid(), request.0.into())
+        .await?
+        .into();
     Ok(project.into())
 }
 
@@ -113,5 +102,20 @@ impl From<dto::Project> for Project {
             created_at: Utc.from_utc_datetime(&issue.created_at),
             updated_at: issue.updated_at.map(|dt| Utc.from_utc_datetime(&dt)),
         }
+    }
+}
+
+impl From<CreateProject> for dto::CreateProject {
+    fn from(request: CreateProject) -> Self {
+        Self {
+            account_uuid: request.account_id.into_uuid(),
+            name: request.name,
+        }
+    }
+}
+
+impl From<UpdateProject> for dto::UpdateProject {
+    fn from(request: UpdateProject) -> Self {
+        Self { name: request.name }
     }
 }

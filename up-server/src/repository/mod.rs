@@ -19,7 +19,7 @@ pub mod dto {
     pub use super::notification::{
         Field as NotificationField, Notification, NotificationAlert, NotificationType,
     };
-    pub use super::project::{Field as ProjectField, Project};
+    pub use super::project::{CreateProject, Project, UpdateProject};
 }
 
 use account::AccountRepository;
@@ -143,11 +143,4 @@ impl<T: ModelField> ToString for QueryValue<T> {
             Self::Expression(_f, v) => format!("{:?}", v),
         }
     }
-}
-
-pub fn updatable_values<T: ModelField + 'static>(values: Vec<QueryValue<T>>) -> Vec<QueryValue<T>> {
-    values
-        .into_iter()
-        .filter(|v| T::updatable().contains(v.field()))
-        .collect()
 }
