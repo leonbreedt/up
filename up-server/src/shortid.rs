@@ -59,12 +59,6 @@ impl From<&ShortId> for Uuid {
     }
 }
 
-impl From<ShortId> for sea_query::Value {
-    fn from(id: ShortId) -> Self {
-        id.to_string().into()
-    }
-}
-
 impl FromStr for ShortId {
     type Err = ParseShortIdError;
 

@@ -1,55 +1,102 @@
-use std::{collections::HashMap, fmt::Debug, fmt::Write as _, hash::Hash, str::FromStr};
-
-use chrono::{NaiveDateTime, Utc};
-use lazy_static::lazy_static;
-use sea_query::{Alias, Expr, Iden, Query, QueryBuilder};
-use sqlx::Row;
-use tracing::Level;
+use chrono::NaiveDateTime;
 use uuid::Uuid;
 
-use super::{bind_query, bind_query_as, ModelField};
-
 use crate::{
-    database::{Database, DbConnection, DbQueryBuilder},
-    repository::{account::AccountRepository, project::ProjectRepository, RepositoryError, Result},
+    database::Database,
+    repository::{RepositoryError, Result},
     shortid::ShortId,
 };
 
 const ENTITY_CHECK: &str = "check";
 
+#[derive(sqlx::FromRow)]
+pub struct Check {
+    pub id: i64,
+    pub uuid: Uuid,
+    pub account_id: i64,
+    pub project_id: i64,
+    pub ping_key: String,
+    pub name: String,
+    pub description: String,
+    pub status: CheckStatus,
+    pub schedule_type: ScheduleType,
+    pub ping_period: i32,
+    pub ping_period_units: PeriodUnits,
+    pub ping_cron_expression: Option<String>,
+    pub grace_period: i32,
+    pub grace_period_units: PeriodUnits,
+    pub last_ping_at: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: Option<NaiveDateTime>,
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "schedule_type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScheduleType {
+    Simple,
+    Cron,
+}
+
+#[derive(sqlx::Type, Copy, Clone)]
+#[sqlx(type_name = "check_status", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CheckStatus {
+    Up,
+    Down,
+    Created,
+}
+
+impl ToString for CheckStatus {
+    fn to_string(&self) -> String {
+        match self {
+            CheckStatus::Up => "UP".to_string(),
+            CheckStatus::Down => "DOWN".to_string(),
+            CheckStatus::Created => "CREATED".to_string(),
+        }
+    }
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "period_units", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PeriodUnits {
+    Hours,
+    Minutes,
+    Days,
+}
+
+#[derive(sqlx::Type, Debug)]
+#[sqlx(type_name = "notification_type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum NotificationType {
+    Email,
+    Webhook,
+}
+
+impl ToString for NotificationType {
+    fn to_string(&self) -> String {
+        match self {
+            NotificationType::Email => "EMAIL".to_string(),
+            NotificationType::Webhook => "WEBHOOK".to_string(),
+        }
+    }
+}
+
+pub struct CreateCheck {
+    pub account_uuid: Uuid,
+    pub project_uuid: Uuid,
+    pub name: String,
+}
+
+pub struct UpdateCheck {
+    pub name: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct CheckRepository {
     database: Database,
-    account: AccountRepository,
-    project: ProjectRepository,
 }
 
 impl CheckRepository {
-    pub fn new(database: Database, account: AccountRepository, project: ProjectRepository) -> Self {
-        Self {
-            database,
-            account,
-            project,
-        }
-    }
-
-    pub async fn get_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
-        let (sql, params) = Query::select()
-            .columns(vec![Field::Id])
-            .from(Field::Table)
-            .and_where(Expr::col(Field::Uuid).eq(*uuid))
-            .build(DbQueryBuilder::default());
-        let row = bind_query(sqlx::query(&sql), &params)
-            .fetch_optional(&mut *conn)
-            .await?;
-        if let Some(row) = row {
-            Ok(row.try_get("id")?)
-        } else {
-            Err(RepositoryError::NotFound {
-                entity_type: ENTITY_CHECK.to_string(),
-                id: ShortId::from_uuid(uuid).to_string(),
-            })
-        }
+    pub fn new(database: Database) -> Self {
+        Self { database }
     }
 
     pub async fn read_one(&self, uuid: &Uuid) -> Result<Check> {
@@ -57,25 +104,42 @@ impl CheckRepository {
 
         tracing::trace!(uuid = uuid.to_string(), "reading check");
 
-        self.read_one_internal(&mut conn, uuid).await
+        let sql = r"
+            SELECT
+                *
+            FROM
+                checks
+            WHERE
+                uuid = $1
+                AND
+                deleted = false
+        ";
+
+        sqlx::query_as(sql)
+            .bind(uuid)
+            .fetch_optional(&mut *conn)
+            .await?
+            .ok_or_else(|| RepositoryError::NotFound {
+                entity_type: ENTITY_CHECK.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            })
     }
 
     pub async fn read_all(&self) -> Result<Vec<Check>> {
         let mut conn = self.database.connection().await?;
 
-        tracing::trace!("reading all checks");
+        tracing::trace!("reading checks");
 
-        let (sql, params) = Query::select()
-            .from(Field::Table)
-            .columns(Field::all().to_vec())
-            .and_where(Expr::col(Field::Deleted).eq(false))
-            .build(DbQueryBuilder::default());
+        let sql = r"
+            SELECT
+                *
+            FROM
+                checks
+            WHERE
+                deleted = false
+        ";
 
-        let checks = bind_query_as(sqlx::query_as(&sql), &params)
-            .fetch_all(&mut *conn)
-            .await?;
-
-        Ok(checks)
+        Ok(sqlx::query_as(sql).fetch_all(&mut *conn).await?)
     }
 
     pub async fn enqueue_alerts_for_overdue_pings(&self) -> Result<()> {
@@ -137,17 +201,19 @@ impl CheckRepository {
         for ping_details in overdue_pings {
             let (check_id, check_uuid, check_status, check_name, last_ping_at) = ping_details;
 
-            let (sql, params) = Query::update()
-                .table(Field::Table)
-                .value_expr(
-                    Field::Status,
-                    Expr::val(CheckStatus::Down.to_string()).as_enum(Alias::new("check_status")),
-                )
-                .and_where(Expr::col(Field::Deleted).eq(false))
-                .and_where(Expr::col(Field::Uuid).eq(check_uuid))
-                .build(DbQueryBuilder::default());
+            let sql = r"
+                UPDATE
+                    checks
+                SET
+                    status = 'DOWN'
+                WHERE
+                    uuid = $1
+                    AND
+                    deleted = false
+            ";
 
-            let rows_updated = bind_query(sqlx::query(&sql), &params)
+            let rows_updated = sqlx::query(sql)
+                .bind(check_uuid)
                 .execute(&mut tx)
                 .await?
                 .rows_affected();
@@ -232,135 +298,86 @@ impl CheckRepository {
         Ok(())
     }
 
-    pub async fn create(
-        &self,
-        account_uuid: &Uuid,
-        project_uuid: &Uuid,
-        name: &str,
-    ) -> Result<Check> {
+    pub async fn create(&self, request: CreateCheck) -> Result<Check> {
         let mut tx = self.database.transaction().await?;
 
-        let account_id = self.account.get_id(&mut tx, account_uuid).await?;
-        let project_id = self.project.get_id(&mut tx, project_uuid).await?;
-
         tracing::trace!(
-            account_id = account_id,
-            project_id = project_id,
-            name = name,
+            account_uuid = request.account_uuid.to_string(),
+            project_uuid = request.project_uuid.to_string(),
+            name = request.name,
             "creating check"
         );
 
-        let now = Utc::now();
-        let id = Uuid::new_v4();
-        let short_id: ShortId = id.into();
+        let uuid = Uuid::new_v4();
+        let short_id: ShortId = uuid.into();
         let ping_key = ShortId::new();
 
-        let (sql, params) = Query::insert()
-            .into_table(Field::Table)
-            .columns([
-                Field::AccountId,
-                Field::ProjectId,
-                Field::Uuid,
-                Field::ShortId,
-                Field::PingKey,
-                Field::Name,
-                Field::CreatedAt,
-                Field::UpdatedAt,
-            ])
-            .values(vec![
-                account_id.into(),
-                project_id.into(),
-                id.into(),
-                short_id.into(),
-                ping_key.into(),
-                name.into(),
-                now.into(),
-                now.into(),
-            ])?
-            .returning(Query::returning().columns(Field::all().to_vec()))
-            .build(DbQueryBuilder::default());
+        let sql = r"
+            INSERT INTO checks (
+                account_id,
+                project_id,
+                uuid,
+                shortid,
+                ping_key,
+                name
+            ) VALUES (
+                (SELECT id FROM accounts WHERE uuid = $1),
+                (SELECT id FROM projects WHERE uuid = $2),
+                $3,
+                $4,
+                $5,
+                $6
+            ) RETURNING *
+        ";
 
-        let check: Check = bind_query_as(sqlx::query_as(&sql), &params)
+        let check: Check = sqlx::query_as(sql)
+            .bind(&request.account_uuid)
+            .bind(&request.project_uuid)
+            .bind(uuid)
+            .bind(short_id.to_string())
+            .bind(ping_key.to_string())
+            .bind(&request.name)
             .fetch_one(&mut tx)
             .await?;
 
         tx.commit().await?;
 
         tracing::trace!(
-            account_uuid = account_uuid.to_string(),
+            account_uuid = &request.account_uuid.to_string(),
             uuid = check.uuid.to_string(),
-            name = name,
+            name = &request.name,
             "check created"
         );
 
         Ok(check)
     }
 
-    pub async fn update(
-        &self,
-        uuid: &Uuid,
-        update_fields: Vec<(Field, sea_query::Value)>,
-    ) -> Result<(bool, Check)> {
+    pub async fn update(&self, uuid: &Uuid, request: UpdateCheck) -> Result<Check> {
         let mut tx = self.database.transaction().await?;
 
-        let update_params: Vec<(Field, sea_query::Value)> = update_fields
-            .into_iter()
-            .filter(|i| Field::updatable().contains(&i.0))
-            .collect();
+        let sql = r"
+            UPDATE
+                checks
+            SET
+                name = COALESCE($2,name)
+            WHERE
+                uuid = $1
+                AND
+                deleted = false
+            RETURNING *
+        ";
 
-        let query_builder = DbQueryBuilder::default();
-
-        if tracing::event_enabled!(Level::TRACE) {
-            let mut fields_to_update = String::from("[");
-            for field in update_params.iter() {
-                let _ = write!(
-                    fields_to_update,
-                    "{}={}",
-                    field.0.as_ref(),
-                    query_builder.value_to_string(&field.1)
-                );
-            }
-            fields_to_update.push(']');
-            tracing::trace!(
-                uuid = uuid.to_string(),
-                fields = fields_to_update,
-                "updating check"
-            );
-        }
-
-        let mut updated = false;
-        if !update_params.is_empty() {
-            let mut values = update_params.clone();
-
-            values.push((Field::UpdatedAt, Utc::now().into()));
-
-            let (sql, params) = Query::update()
-                .table(Field::Table)
-                .values(values)
-                .and_where(Expr::col(Field::Deleted).eq(false))
-                .and_where(Expr::col(Field::Uuid).eq(*uuid))
-                .and_where(Expr::col(Field::Deleted).eq(false))
-                .build(query_builder);
-
-            let rows_updated = bind_query(sqlx::query(&sql), &params)
-                .execute(&mut tx)
-                .await?
-                .rows_affected();
-
-            updated = rows_updated > 0
-        }
-
-        let check = self.read_one_internal(&mut tx, uuid).await?;
+        let check: Check = sqlx::query_as(sql)
+            .bind(uuid)
+            .bind(&request.name)
+            .fetch_one(&mut tx)
+            .await?;
 
         tx.commit().await?;
 
-        if updated {
-            tracing::trace!(uuid = uuid.to_string(), "check updated");
-        } else {
-            tracing::trace!(uuid = uuid.to_string(), "no change, check not updated");
-        }
+        tracing::trace!(uuid = uuid.to_string(), "check updated");
 
-        Ok((updated, check))
+        Ok(check)
     }
 
     pub async fn delete(&self, uuid: &Uuid) -> Result<bool> {
@@ -368,21 +385,22 @@ impl CheckRepository {
 
         tracing::trace!(uuid = uuid.to_string(), "deleting check");
 
-        let (sql, params) = Query::update()
-            .table(Field::Table)
-            .values(vec![
-                (Field::Deleted, true.into()),
-                (Field::DeletedAt, Utc::now().into()),
-            ])
-            .and_where(Expr::col(Field::Uuid).eq(*uuid))
-            .build(DbQueryBuilder::default());
+        let sql = r"
+            UPDATE
+                checks
+            SET
+                deleted = true,
+                deleted_at = NOW() AT TIME ZONE 'UTC'
+            WHERE
+                uuid = $1
+        ";
 
-        let rows_deleted = bind_query(sqlx::query(&sql), &params)
+        let deleted = sqlx::query(sql)
+            .bind(uuid)
             .execute(&mut tx)
             .await?
-            .rows_affected();
-
-        let deleted = rows_deleted > 0;
+            .rows_affected()
+            > 0;
 
         tx.commit().await?;
 
@@ -396,256 +414,27 @@ impl CheckRepository {
     pub async fn ping(&self, key: &str) -> Result<Option<Uuid>> {
         let mut tx = self.database.transaction().await?;
 
-        let (sql, params) = Query::select()
-            .from(Field::Table)
-            .columns(vec![Field::Id, Field::Uuid])
-            .and_where(Expr::col(Field::PingKey).eq(key))
-            .and_where(Expr::col(Field::Deleted).eq(false))
-            .build(DbQueryBuilder::default());
+        let sql = r"
+            UPDATE
+                checks
+            SET
+                status = 'UP',
+                last_ping_at = NOW() AT TIME ZONE 'UTC'
+            WHERE
+                ping_key = $1
+                AND
+                deleted = false
+            RETURNING
+                uuid
+        ";
 
-        let result: (i64, Uuid) = bind_query_as(sqlx::query_as(&sql), &params)
+        let check_uuid: Option<(Uuid,)> = sqlx::query_as(sql)
+            .bind(key)
             .fetch_optional(&mut tx)
-            .await?
-            .ok_or_else(|| RepositoryError::NotFoundPingKey {
-                key: key.to_string(),
-            })?;
-
-        let (sql, params) = Query::update()
-            .table(Field::Table)
-            .value(Field::LastPingAt, Utc::now().into())
-            .value_expr(
-                Field::Status,
-                Expr::val(CheckStatus::Up.to_string()).as_enum(Alias::new("check_status")),
-            )
-            .and_where(Expr::col(Field::Id).eq(result.0))
-            .and_where(Expr::col(Field::Deleted).eq(false))
-            .build(DbQueryBuilder::default());
-
-        let rows_updated = bind_query(sqlx::query(&sql), &params)
-            .execute(&mut tx)
-            .await?
-            .rows_affected();
+            .await?;
 
         tx.commit().await?;
 
-        if rows_updated > 0 {
-            Ok(Some(result.1))
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn read_one_internal(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<Check> {
-        tracing::trace!(uuid = uuid.to_string(), "reading check");
-
-        let (sql, params) = Query::select()
-            .from(Field::Table)
-            .columns(Field::all().to_vec())
-            .and_where(Expr::col(Field::Deleted).eq(false))
-            .and_where(Expr::col(Field::Uuid).eq(*uuid))
-            .build(DbQueryBuilder::default());
-
-        let check: Option<Check> = bind_query_as(sqlx::query_as(&sql), &params)
-            .fetch_optional(&mut *conn)
-            .await?;
-
-        check.ok_or_else(|| RepositoryError::NotFound {
-            entity_type: ENTITY_CHECK.to_string(),
-            id: ShortId::from_uuid(uuid).to_string(),
-        })
-    }
-}
-
-#[derive(sqlx::Type)]
-#[sqlx(type_name = "schedule_type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ScheduleType {
-    Simple,
-    Cron,
-}
-
-#[derive(sqlx::Type, Copy, Clone)]
-#[sqlx(type_name = "check_status", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum CheckStatus {
-    Up,
-    Down,
-    Created,
-}
-
-impl ToString for CheckStatus {
-    fn to_string(&self) -> String {
-        match self {
-            CheckStatus::Up => "UP".to_string(),
-            CheckStatus::Down => "DOWN".to_string(),
-            CheckStatus::Created => "CREATED".to_string(),
-        }
-    }
-}
-
-#[derive(sqlx::Type)]
-#[sqlx(type_name = "period_units", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum PeriodUnits {
-    Hours,
-    Minutes,
-    Days,
-}
-
-#[derive(sqlx::FromRow)]
-pub struct Check {
-    pub id: i64,
-    pub uuid: Uuid,
-    pub account_id: i64,
-    pub project_id: i64,
-    pub ping_key: String,
-    pub name: String,
-    pub description: String,
-    pub status: CheckStatus,
-    pub schedule_type: ScheduleType,
-    pub ping_period: i32,
-    pub ping_period_units: PeriodUnits,
-    pub ping_cron_expression: Option<String>,
-    pub grace_period: i32,
-    pub grace_period_units: PeriodUnits,
-    pub last_ping_at: Option<NaiveDateTime>,
-    pub created_at: NaiveDateTime,
-    pub updated_at: Option<NaiveDateTime>,
-}
-
-// TODO: Add Notification
-
-#[derive(sqlx::Type, Debug)]
-#[sqlx(type_name = "notification_type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum NotificationType {
-    Email,
-    Webhook,
-}
-
-impl ToString for NotificationType {
-    fn to_string(&self) -> String {
-        match self {
-            NotificationType::Email => "EMAIL".to_string(),
-            NotificationType::Webhook => "WEBHOOK".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum Field {
-    Table,
-    Id,
-    AccountId,
-    ProjectId,
-    Uuid,
-    ShortId,
-    PingKey,
-    Name,
-    Description,
-    ScheduleType,
-    PingPeriod,
-    PingPeriodUnits,
-    PingCronExpression,
-    GracePeriod,
-    GracePeriodUnits,
-    Status,
-    LastPingAt,
-    CreatedAt,
-    UpdatedAt,
-    Deleted,
-    DeletedAt,
-}
-
-impl Iden for Field {
-    fn unquoted(&self, s: &mut dyn std::fmt::Write) {
-        write!(s, "{}", self.as_ref()).unwrap();
-    }
-}
-
-lazy_static! {
-    static ref NAME_TO_FIELD: HashMap<String, Field> = vec![
-        (Field::Id.to_string(), Field::Id),
-        (Field::AccountId.to_string(), Field::AccountId),
-        (Field::ProjectId.to_string(), Field::ProjectId),
-        (Field::Uuid.to_string(), Field::Uuid),
-        (Field::ShortId.to_string(), Field::ShortId),
-        (Field::PingKey.to_string(), Field::PingKey),
-        (Field::Name.to_string(), Field::Name),
-        (Field::Description.to_string(), Field::Description),
-        (Field::ScheduleType.to_string(), Field::ScheduleType),
-        (Field::PingPeriod.to_string(), Field::PingPeriod),
-        (Field::PingPeriodUnits.to_string(), Field::PingPeriodUnits),
-        (
-            Field::PingCronExpression.to_string(),
-            Field::PingCronExpression
-        ),
-        (Field::GracePeriod.to_string(), Field::GracePeriod),
-        (Field::GracePeriodUnits.to_string(), Field::GracePeriodUnits),
-        (Field::Status.to_string(), Field::Status),
-        (Field::LastPingAt.to_string(), Field::LastPingAt),
-        (Field::CreatedAt.to_string(), Field::CreatedAt),
-        (Field::UpdatedAt.to_string(), Field::UpdatedAt),
-        (Field::Deleted.to_string(), Field::Deleted),
-        (Field::DeletedAt.to_string(), Field::DeletedAt),
-    ]
-    .into_iter()
-    .collect();
-    static ref ALL_FIELDS: Vec<Field> = NAME_TO_FIELD.values().cloned().collect();
-}
-
-impl ModelField for Field {
-    fn all() -> &'static [Field] {
-        &ALL_FIELDS
-    }
-
-    fn updatable() -> &'static [Field] {
-        &[
-            Field::Name,
-            Field::Description,
-            Field::ScheduleType,
-            Field::PingPeriod,
-            Field::PingPeriodUnits,
-            Field::PingCronExpression,
-            Field::GracePeriod,
-            Field::GracePeriodUnits,
-            Field::Status,
-        ]
-    }
-}
-
-impl AsRef<str> for Field {
-    fn as_ref(&self) -> &str {
-        match self {
-            Self::Table => "checks",
-            Self::Id => "id",
-            Self::AccountId => "account_id",
-            Self::ProjectId => "project_id",
-            Self::Uuid => "uuid",
-            Self::ShortId => "shortid",
-            Self::PingKey => "ping_key",
-            Self::Name => "name",
-            Self::Description => "description",
-            Self::ScheduleType => "schedule_type",
-            Self::PingPeriod => "ping_period",
-            Self::PingPeriodUnits => "ping_period_units",
-            Self::PingCronExpression => "ping_cron_expression",
-            Self::GracePeriod => "grace_period",
-            Self::GracePeriodUnits => "grace_period_units",
-            Self::Status => "status",
-            Self::LastPingAt => "last_ping_at",
-            Self::CreatedAt => "created_at",
-            Self::UpdatedAt => "updated_at",
-            Self::Deleted => "deleted",
-            Self::DeletedAt => "deleted_at",
-        }
-    }
-}
-
-impl FromStr for Field {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        if let Some(field) = NAME_TO_FIELD.get(value) {
-            Ok(*field)
-        } else {
-            anyhow::bail!("unsupported Check variant '{}'", value);
-        }
+        Ok(check_uuid.map(|id| id.0))
     }
 }

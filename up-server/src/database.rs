@@ -7,11 +7,9 @@ use tracing::log::LevelFilter;
 
 pub type DbType = sqlx::Postgres;
 pub type DbConnectOptions = sqlx::postgres::PgConnectOptions;
-pub type DbConnection = sqlx::postgres::PgConnection;
 pub type DbPoolConnection = PoolConnection<DbType>;
 pub type DbPoolOptions = sqlx::postgres::PgPoolOptions;
 pub type DbTransaction<'t> = sqlx::Transaction<'t, DbType>;
-pub type DbQueryBuilder = sea_query::PostgresQueryBuilder;
 
 const SLOW_STATEMENT_THRESHOLD_MS: Duration = Duration::from_millis(5000);
 static MIGRATOR: Migrator = sqlx::migrate!();

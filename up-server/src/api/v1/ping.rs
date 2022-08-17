@@ -7,11 +7,7 @@ use axum::{
     Extension,
 };
 
-use crate::{
-    api::v1::ApiError,
-    mask,
-    repository::{Repository, RepositoryError},
-};
+use crate::{api::v1::ApiError, mask, repository::Repository};
 
 pub async fn ping(
     Path(key): Path<String>,
@@ -32,9 +28,6 @@ pub async fn ping(
         }
         Ok(None) => {
             tracing::trace!(key = key, "ignoring ping received, unknown key")
-        }
-        Err(RepositoryError::NotFoundPingKey { key: _key }) => {
-            tracing::trace!("ignoring ping key not found")
         }
         Err(e) => {
             tracing::error!(err = format!("{:?}", e), "failed to process ping")

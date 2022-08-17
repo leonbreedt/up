@@ -2,7 +2,7 @@ use chrono::NaiveDateTime;
 use uuid::Uuid;
 
 use crate::{
-    database::{Database, DbConnection},
+    database::Database,
     repository::{RepositoryError, Result},
     shortid::ShortId,
 };
@@ -36,30 +36,10 @@ impl ProjectRepository {
         Self { database }
     }
 
-    // TODO: remove
-    pub async fn get_id(&self, conn: &mut DbConnection, uuid: &Uuid) -> Result<i64> {
-        let sql = r"
-            SELECT
-                id
-            FROM
-                projects 
-            WHERE
-                uuid = $1 AND deleted = false
-        ";
-
-        sqlx::query_as(sql)
-            .bind(uuid)
-            .fetch_optional(&mut *conn)
-            .await?
-            .map(|id: (i64,)| id.0)
-            .ok_or(RepositoryError::NotFound {
-                entity_type: ENTITY_PROJECT.to_string(),
-                id: ShortId::from_uuid(uuid).to_string(),
-            })
-    }
-
     pub async fn read_one(&self, uuid: &Uuid) -> Result<Project> {
         let mut conn = self.database.connection().await?;
+
+        tracing::trace!(uuid = uuid.to_string(), "reading project");
 
         let sql = r"
             SELECT
@@ -84,6 +64,8 @@ impl ProjectRepository {
 
     pub async fn read_all(&self) -> Result<Vec<Project>> {
         let mut conn = self.database.connection().await?;
+
+        tracing::trace!("reading projects");
 
         let sql = r"
             SELECT

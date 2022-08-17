@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::{v1::ApiError, Json},
-    repository::{dto, QueryValue, Repository},
+    repository::{dto, Repository},
     shortid::ShortId,
 };
 
@@ -37,15 +37,7 @@ pub async fn create(
     repository: Extension<Repository>,
     request: Json<CreateCheck>,
 ) -> Result<Json<Check>, ApiError> {
-    let check = repository
-        .check()
-        .create(
-            request.account_id.as_uuid(),
-            request.project_id.as_uuid(),
-            &request.name,
-        )
-        .await?;
-    let check: Check = check.into();
+    let check: Check = repository.check().create(request.0.into()).await?.into();
     Ok(check.into())
 }
 
@@ -55,15 +47,11 @@ pub async fn update(
     repository: Extension<Repository>,
     request: Json<UpdateCheck>,
 ) -> Result<Json<Check>, ApiError> {
-    let mut update_fields = Vec::new();
-    if let Some(name) = &request.name {
-        update_fields.push((dto::CheckField::Name, name.as_str().into()));
-    }
-    let (_, check) = repository
+    let check: Check = repository
         .check()
-        .update(id.as_uuid(), update_fields)
-        .await?;
-    let check: Check = check.into();
+        .update(id.as_uuid(), request.0.into())
+        .await?
+        .into();
     Ok(check.into())
 }
 
@@ -110,11 +98,11 @@ pub async fn create_notification(
     repository: Extension<Repository>,
     request: Json<CreateNotification>,
 ) -> Result<Json<Notification>, ApiError> {
-    let notification = repository
+    let notification: Notification = repository
         .notification()
-        .create(id.as_uuid(), request.values())
-        .await?;
-    let notification: Notification = notification.into();
+        .create(id.as_uuid(), request.0.into())
+        .await?
+        .into();
     Ok(notification.into())
 }
 
@@ -124,11 +112,11 @@ pub async fn update_notification(
     repository: Extension<Repository>,
     request: Json<UpdateNotification>,
 ) -> Result<Json<Notification>, ApiError> {
-    let (_, notification) = repository
+    let notification: Notification = repository
         .notification()
-        .update(id.as_uuid(), notification_id.as_uuid(), request.values())
-        .await?;
-    let notification: Notification = notification.into();
+        .update(id.as_uuid(), notification_id.as_uuid(), request.0.into())
+        .await?
+        .into();
     Ok(notification.into())
 }
 
@@ -310,33 +298,6 @@ pub struct CreateNotification {
     pub max_retries: Option<i32>,
 }
 
-impl CreateNotification {
-    pub fn values(&self) -> Vec<QueryValue<dto::NotificationField>> {
-        let mut values = Vec::new();
-        if let Some(name) = self.name.as_deref() {
-            values.push(QueryValue::value(dto::NotificationField::Name, name));
-        }
-        let notification_type: dto::NotificationType = (&self.notification_type).into();
-        values.push(QueryValue::expr(
-            dto::NotificationField::NotificationType,
-            notification_type,
-        ));
-        if let Some(email) = self.email.as_deref() {
-            values.push(QueryValue::value(dto::NotificationField::Email, email));
-        }
-        if let Some(url) = self.url.as_deref() {
-            values.push(QueryValue::value(dto::NotificationField::Email, url));
-        }
-        if let Some(max_retries) = self.max_retries {
-            values.push(QueryValue::value(
-                dto::NotificationField::MaxRetries,
-                max_retries,
-            ));
-        }
-        values
-    }
-}
-
 /// Body for `PUT /api/v1/notifications`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateNotification {
@@ -350,35 +311,6 @@ pub struct UpdateNotification {
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<i32>,
-}
-
-impl UpdateNotification {
-    pub fn values(&self) -> Vec<QueryValue<dto::NotificationField>> {
-        let mut values = Vec::new();
-        if let Some(name) = self.name.as_deref() {
-            values.push(QueryValue::value(dto::NotificationField::Name, name));
-        }
-        if let Some(notification_type) = &self.notification_type {
-            let notification_type: dto::NotificationType = notification_type.into();
-            values.push(QueryValue::expr(
-                dto::NotificationField::NotificationType,
-                notification_type,
-            ));
-        }
-        if let Some(email) = self.email.as_deref() {
-            values.push(QueryValue::value(dto::NotificationField::Email, email));
-        }
-        if let Some(url) = self.url.as_deref() {
-            values.push(QueryValue::value(dto::NotificationField::Email, url));
-        }
-        if let Some(max_retries) = self.max_retries {
-            values.push(QueryValue::value(
-                dto::NotificationField::MaxRetries,
-                max_retries,
-            ));
-        }
-        values
-    }
 }
 
 // Notification model conversions
@@ -411,11 +343,51 @@ impl From<dto::NotificationType> for NotificationType {
     }
 }
 
-impl From<&NotificationType> for dto::NotificationType {
-    fn from(notification_type: &NotificationType) -> Self {
+impl From<NotificationType> for dto::NotificationType {
+    fn from(notification_type: NotificationType) -> Self {
         match notification_type {
             NotificationType::Email => dto::NotificationType::Email,
             NotificationType::Webhook => dto::NotificationType::Webhook,
+        }
+    }
+}
+
+impl From<CreateCheck> for dto::CreateCheck {
+    fn from(request: CreateCheck) -> Self {
+        Self {
+            account_uuid: request.account_id.into_uuid(),
+            project_uuid: request.project_id.into_uuid(),
+            name: request.name,
+        }
+    }
+}
+
+impl From<UpdateCheck> for dto::UpdateCheck {
+    fn from(request: UpdateCheck) -> Self {
+        Self { name: request.name }
+    }
+}
+
+impl From<CreateNotification> for dto::CreateNotification {
+    fn from(request: CreateNotification) -> Self {
+        Self {
+            notification_type: request.notification_type.into(),
+            name: request.name,
+            email: request.email,
+            url: request.url,
+            max_retries: request.max_retries,
+        }
+    }
+}
+
+impl From<UpdateNotification> for dto::UpdateNotification {
+    fn from(request: UpdateNotification) -> Self {
+        Self {
+            name: request.name,
+            notification_type: request.notification_type.map(|t| t.into()),
+            email: request.email,
+            url: request.url,
+            max_retries: request.max_retries,
         }
     }
 }
