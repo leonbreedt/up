@@ -3,6 +3,7 @@ use argh::FromArgs;
 use crate::CliError;
 
 mod ca_certificate;
+mod certificate;
 mod keypair;
 
 /// Generates keys and certificates.
@@ -18,6 +19,7 @@ pub struct GenerateCommand {
 pub enum GenerateSubCommand {
     Keypair(keypair::GenerateKeypairCommand),
     CACertificate(ca_certificate::GenerateCACertificateCommand),
+    Certificate(certificate::GenerateCertificateCommand),
 }
 
 impl GenerateCommand {
@@ -25,6 +27,7 @@ impl GenerateCommand {
         match &self.subcommand {
             GenerateSubCommand::Keypair(cmd) => cmd.run().await,
             GenerateSubCommand::CACertificate(cmd) => cmd.run().await,
+            GenerateSubCommand::Certificate(cmd) => cmd.run().await,
         }
     }
 }

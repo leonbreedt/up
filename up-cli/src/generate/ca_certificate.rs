@@ -37,8 +37,8 @@ pub struct GenerateCACertificateCommand {
     #[argh(switch)]
     no_passphrase: bool,
 
-    /// certificate expiry in days from today (default: 365)
-    #[argh(option, default = "365")]
+    /// certificate expiry in days from today (default: 1825)
+    #[argh(option, default = "1825")]
     expiry_days: u32,
 }
 
