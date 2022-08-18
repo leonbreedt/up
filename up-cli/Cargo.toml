@@ -9,9 +9,12 @@ path = "src/main.rs"
 
 [dependencies]
 argh = "0.1.8"
+base64 = "0.13.0"
 camino = "1.1.1"
 openssl = "0.10.41"
 rpassword = "7.0.0"
+serde = { version = "1.0.143", features = ["derive"] }
+serde_json = "1.0.83"
 thiserror = "1.0.32"
 tokio = { version = "1.20.1", features = ["full"] }
 tracing = "0.1.36"
