@@ -2,6 +2,7 @@ use miette::Result;
 
 mod api;
 mod app;
+mod auth;
 mod database;
 mod integrations;
 mod jobs;
