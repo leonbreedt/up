@@ -13,13 +13,13 @@ pub enum CliError {
 }
 
 /// Command-line interface for UP admin and operations tasks.
-#[derive(FromArgs, PartialEq, Debug)]
+#[derive(FromArgs, PartialEq, Eq, Debug)]
 pub struct Arguments {
     #[argh(subcommand)]
     command: RootCommand,
 }
 
-#[derive(FromArgs, PartialEq, Debug)]
+#[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand)]
 pub enum RootCommand {
     Generate(generate::GenerateCommand),

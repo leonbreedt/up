@@ -1,14 +1,13 @@
-use argh::FromArgs;
-use camino::{Utf8Path, Utf8PathBuf};
-use openssl::pkey::PKey;
-use openssl::rsa::Rsa;
-use openssl::symm::Cipher;
 use std::fs;
+
+use argh::FromArgs;
+use camino::Utf8PathBuf;
+use openssl::{rsa::Rsa, symm::Cipher};
 
 use crate::CliError;
 
 /// Generate keypair.
-#[derive(FromArgs, PartialEq, Debug)]
+#[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "keypair")]
 pub struct GenerateKeypairCommand {
     #[argh(positional)]
