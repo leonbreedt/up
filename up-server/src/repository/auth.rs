@@ -5,9 +5,11 @@ use crate::{database::Database, repository::Result};
 
 #[derive(sqlx::FromRow)]
 pub struct User {
+    pub id: i64,
     pub uuid: Uuid,
     pub email: String,
     pub account_uuids: Vec<Uuid>,
+    pub project_uuids: Vec<Uuid>,
     pub roles: Vec<UserRole>,
 }
 
@@ -40,6 +42,7 @@ impl AuthRepository {
 
         let sql = r"
             SELECT
+                id,
                 uuid,
                 email,
                 ARRAY(
@@ -48,6 +51,12 @@ impl AuthRepository {
                     INNER JOIN accounts a ON a.id = ua.account_id
                     WHERE ua.user_id = users.id
                 ) AS account_uuids,
+                ARRAY(
+                    SELECT DISTINCT p.uuid
+                    FROM user_projects up
+                    INNER JOIN projects p ON p.id = up.project_id
+                    WHERE up.user_id = users.id
+                ) AS project_uuids,
                 ARRAY(
                     SELECT DISTINCT ur.role
                     FROM user_roles ur

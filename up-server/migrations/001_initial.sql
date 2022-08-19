@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS user_accounts (
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_unique_email
 ON users (email)
-WHERE deleted_at IS NULL;
+WHERE deleted = false;
 
 CREATE TABLE IF NOT EXISTS projects (
     id          BIGSERIAL PRIMARY KEY,
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE UNIQUE INDEX IF NOT EXISTS projects_unique_name_account_id
     ON projects (name, account_id)
-    WHERE deleted_at IS NULL;
+    WHERE deleted = false;
 
 CREATE TABLE IF NOT EXISTS user_projects (
     user_id    BIGINT NOT NULL REFERENCES users (id),

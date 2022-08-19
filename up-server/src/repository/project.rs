@@ -1,16 +1,19 @@
 use chrono::NaiveDateTime;
 use uuid::Uuid;
 
+use crate::auth::Identity;
 use crate::{
     database::Database,
     repository::{RepositoryError, Result},
     shortid::ShortId,
 };
 
+const ENTITY_ACCOUNT: &str = "account";
 const ENTITY_PROJECT: &str = "project";
 
 #[derive(sqlx::FromRow)]
 pub struct Project {
+    pub id: i64,
     pub uuid: Uuid,
     pub name: String,
     pub created_at: NaiveDateTime,
@@ -36,7 +39,18 @@ impl ProjectRepository {
         Self { database }
     }
 
-    pub async fn read_one(&self, uuid: &Uuid) -> Result<Project> {
+    pub async fn read_one(&self, identity: &Identity, uuid: &Uuid) -> Result<Project> {
+        if !identity.is_assigned_to_project(uuid) {
+            tracing::trace!(
+                uuid = uuid.to_string(),
+                "user not assigned to project, aborting read"
+            );
+            return Err(RepositoryError::NotFound {
+                entity_type: ENTITY_PROJECT.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            });
+        }
+
         let mut conn = self.database.connection().await?;
 
         tracing::trace!(uuid = uuid.to_string(), "reading project");
@@ -62,7 +76,7 @@ impl ProjectRepository {
             })
     }
 
-    pub async fn read_all(&self) -> Result<Vec<Project>> {
+    pub async fn read_all(&self, identity: &Identity) -> Result<Vec<Project>> {
         let mut conn = self.database.connection().await?;
 
         tracing::trace!("reading projects");
@@ -73,13 +87,29 @@ impl ProjectRepository {
             FROM
                 projects
             WHERE
+                uuid = ANY($1)
+                AND
                 deleted = false
         ";
 
-        Ok(sqlx::query_as(sql).fetch_all(&mut *conn).await?)
+        Ok(sqlx::query_as(sql)
+            .bind(&identity.project_uuids)
+            .fetch_all(&mut *conn)
+            .await?)
     }
 
-    pub async fn create(&self, request: CreateProject) -> Result<Project> {
+    pub async fn create(&self, identity: &Identity, request: CreateProject) -> Result<Project> {
+        if !identity.is_administrator() {
+            return Err(RepositoryError::Forbidden);
+        }
+
+        if !identity.is_assigned_to_account(&request.account_uuid) {
+            return Err(RepositoryError::NotFound {
+                entity_type: ENTITY_ACCOUNT.to_string(),
+                id: ShortId::from_uuid(&request.account_uuid).to_string(),
+            });
+        }
+
         let mut tx = self.database.transaction().await?;
 
         let id = Uuid::new_v4();
@@ -107,6 +137,22 @@ impl ProjectRepository {
             .fetch_one(&mut tx)
             .await?;
 
+        let sql = r"
+            INSERT INTO user_projects (
+                user_id,
+                project_id
+            ) VALUES (
+                $1,
+                $2
+            )
+        ";
+
+        sqlx::query(sql)
+            .bind(identity.user_id)
+            .bind(project.id)
+            .execute(&mut tx)
+            .await?;
+
         tx.commit().await?;
 
         tracing::trace!(
@@ -119,7 +165,16 @@ impl ProjectRepository {
         Ok(project)
     }
 
-    pub async fn update(&self, uuid: &Uuid, request: UpdateProject) -> Result<Project> {
+    pub async fn update(
+        &self,
+        identity: &Identity,
+        uuid: &Uuid,
+        request: UpdateProject,
+    ) -> Result<Project> {
+        if !identity.is_administrator() {
+            return Err(RepositoryError::Forbidden);
+        }
+
         let mut tx = self.database.transaction().await?;
 
         let sql = r"
@@ -147,7 +202,11 @@ impl ProjectRepository {
         Ok(project)
     }
 
-    pub async fn delete(&self, uuid: &Uuid) -> Result<bool> {
+    pub async fn delete(&self, identity: &Identity, uuid: &Uuid) -> Result<bool> {
+        if !identity.is_administrator() {
+            return Err(RepositoryError::Forbidden);
+        }
+
         let mut tx = self.database.transaction().await?;
 
         let sql = r"

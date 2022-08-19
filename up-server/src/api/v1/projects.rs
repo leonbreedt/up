@@ -3,6 +3,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::Identity;
 use crate::{
     api::{v1::ApiError, Json},
     repository::{dto, Repository},
@@ -12,19 +13,25 @@ use crate::{
 /// Handler for `GET /api/v1/projects/:id`
 pub async fn read_one(
     Path(id): Path<ShortId>,
+    Extension(identity): Extension<Identity>,
     repository: Extension<Repository>,
 ) -> Result<Json<Project>, ApiError> {
-    let project: Project = repository.project().read_one(id.as_uuid()).await?.into();
+    let project: Project = repository
+        .project()
+        .read_one(&identity, id.as_uuid())
+        .await?
+        .into();
     Ok(project.into())
 }
 
 /// Handler for `GET /api/v1/projects`
 pub async fn read_all(
     Extension(repository): Extension<Repository>,
+    Extension(identity): Extension<Identity>,
 ) -> Result<Json<Vec<Project>>, ApiError> {
     let projects: Vec<Project> = repository
         .project()
-        .read_all()
+        .read_all(&identity)
         .await?
         .into_iter()
         .map(|i| i.into())
@@ -34,22 +41,28 @@ pub async fn read_all(
 
 /// Handler for `POST /api/v1/projects`
 pub async fn create(
-    repository: Extension<Repository>,
+    Extension(repository): Extension<Repository>,
+    Extension(identity): Extension<Identity>,
     request: Json<CreateProject>,
 ) -> Result<Json<Project>, ApiError> {
-    let project: Project = repository.project().create(request.0.into()).await?.into();
+    let project: Project = repository
+        .project()
+        .create(&identity, request.0.into())
+        .await?
+        .into();
     Ok(project.into())
 }
 
 /// Handler for `PUT /api/v1/projects/:id`
 pub async fn update(
     Path(id): Path<ShortId>,
-    repository: Extension<Repository>,
+    Extension(repository): Extension<Repository>,
+    Extension(identity): Extension<Identity>,
     request: Json<UpdateProject>,
 ) -> Result<Json<Project>, ApiError> {
     let project: Project = repository
         .project()
-        .update(id.as_uuid(), request.0.into())
+        .update(&identity, id.as_uuid(), request.0.into())
         .await?
         .into();
     Ok(project.into())
@@ -59,8 +72,9 @@ pub async fn update(
 pub async fn delete(
     Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
+    Extension(identity): Extension<Identity>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.project().delete(id.as_uuid()).await?;
+    repository.project().delete(&identity, id.as_uuid()).await?;
     Ok(Empty::new())
 }
 

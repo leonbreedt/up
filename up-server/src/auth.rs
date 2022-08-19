@@ -20,11 +20,29 @@ const SKIP_AUTH_URIS: &[&str] = &[PING_URI, HEALTH_URI];
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Identity {
     #[serde(skip_serializing)]
+    pub user_id: i64,
+    #[serde(skip_serializing)]
     pub user_uuid: Uuid,
     #[serde(skip_serializing)]
     pub account_uuids: Vec<Uuid>,
+    #[serde(skip_serializing)]
+    pub project_uuids: Vec<Uuid>,
     pub email: String,
     pub roles: Vec<Role>,
+}
+
+impl Identity {
+    pub fn is_administrator(&self) -> bool {
+        self.roles.contains(&Role::Administrator)
+    }
+
+    pub fn is_assigned_to_project(&self, uuid: &Uuid) -> bool {
+        self.project_uuids.contains(uuid)
+    }
+
+    pub fn is_assigned_to_account(&self, uuid: &Uuid) -> bool {
+        self.account_uuids.contains(uuid)
+    }
 }
 
 impl From<&UserRole> for Role {
@@ -40,8 +58,10 @@ impl From<&UserRole> for Role {
 impl From<User> for Identity {
     fn from(u: User) -> Self {
         Self {
+            user_id: u.id,
             user_uuid: u.uuid,
             account_uuids: u.account_uuids,
+            project_uuids: u.project_uuids,
             email: u.email,
             roles: u.roles.iter().map(|r| r.into()).collect(),
         }
@@ -65,11 +85,7 @@ pub async fn auth_middleware<B>(
         .and_then(|header| header.to_str().ok());
 
     let repository = req.extensions().get::<repository::Repository>().unwrap();
-    let jwt_verifier = req
-        .extensions()
-        .get::<Arc<jwt::Verifier>>()
-        .unwrap()
-        .clone();
+    let jwt_verifier = req.extensions().get::<Arc<jwt::Verifier>>().unwrap();
 
     let auth_header = if let Some(auth_header) = auth_header {
         auth_header
@@ -98,7 +114,8 @@ pub async fn auth_middleware<B>(
                 tracing::trace!(
                     user_uuid = identity.user_uuid.to_string(),
                     email = mask::email(&identity.email),
-                    account_ids = format!("{:?}", identity.account_uuids),
+                    account_uuids = format!("{:?}", identity.account_uuids),
+                    project_uuids = format!("{:?}", identity.project_uuids),
                     roles = format!("{:?}", identity.roles),
                     "user authorized"
                 );
