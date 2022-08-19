@@ -1,17 +1,52 @@
+use std::sync::Arc;
+
 use axum::{
     http::{header, Request, StatusCode},
     middleware::Next,
     response::Response,
 };
-use std::sync::Arc;
-use up_core::jwt;
+use serde::{Deserialize, Serialize};
+use up_core::{auth::Role, jwt};
+use uuid::Uuid;
 
 use crate::{
     api::{HEALTH_URI, PING_URI},
     mask, repository,
+    repository::dto::{User, UserRole},
 };
 
 const SKIP_AUTH_URIS: &[&str] = &[PING_URI, HEALTH_URI];
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Identity {
+    #[serde(skip_serializing)]
+    pub user_uuid: Uuid,
+    #[serde(skip_serializing)]
+    pub account_uuids: Vec<Uuid>,
+    pub email: String,
+    pub roles: Vec<Role>,
+}
+
+impl From<&UserRole> for Role {
+    fn from(role: &UserRole) -> Self {
+        match role {
+            UserRole::Administrator => Role::Administrator,
+            UserRole::Member => Role::Member,
+            UserRole::Viewer => Role::Viewer,
+        }
+    }
+}
+
+impl From<User> for Identity {
+    fn from(u: User) -> Self {
+        Self {
+            user_uuid: u.uuid,
+            account_uuids: u.account_uuids,
+            email: u.email,
+            roles: u.roles.iter().map(|r| r.into()).collect(),
+        }
+    }
+}
 
 pub async fn auth_middleware<B>(
     mut req: Request<B>,
@@ -59,12 +94,15 @@ pub async fn auth_middleware<B>(
     if let Some(subject) = claims.subject {
         match repository.auth().find_user_by_subject(&subject).await {
             Ok(Some(user)) => {
+                let identity: Identity = user.into();
                 tracing::trace!(
-                    user_uuid = user.uuid.to_string(),
-                    email = mask::email(&user.email),
+                    user_uuid = identity.user_uuid.to_string(),
+                    email = mask::email(&identity.email),
+                    account_ids = format!("{:?}", identity.account_uuids),
+                    roles = format!("{:?}", identity.roles),
                     "user authorized"
                 );
-                req.extensions_mut().insert(user);
+                req.extensions_mut().insert(identity);
                 return Ok(next.run(req).await);
             }
             Ok(None) => {

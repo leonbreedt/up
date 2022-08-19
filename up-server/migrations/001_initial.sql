@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS users (
     id          BIGSERIAL PRIMARY KEY,
     uuid        UUID NOT NULL DEFAULT gen_random_uuid(),
     shortid     TEXT NOT NULL,
+    -- this randomly generated value is what goes into JWT, not identifying information like email,
+    -- so that it can be revoked easily, invalidating any extant JWTs immediately
     subject     TEXT NOT NULL,
     email       TEXT NOT NULL,
     created_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
@@ -24,6 +26,14 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT  users_unique_uuid UNIQUE (uuid),
     CONSTRAINT  users_unique_shortid UNIQUE (shortid),
     CONSTRAINT  users_unique_subject UNIQUE (subject)
+);
+
+CREATE TYPE user_role AS ENUM ('ADMINISTRATOR', 'MEMBER', 'VIEWER');
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id    BIGINT NOT NULL REFERENCES users (id),
+    role       user_role NOT NULL,
+    PRIMARY KEY (user_id, role)
 );
 
 CREATE TABLE IF NOT EXISTS user_accounts (

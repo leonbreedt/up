@@ -1,3 +1,4 @@
+use sqlx::postgres::{PgHasArrayType, PgTypeInfo};
 use uuid::Uuid;
 
 use crate::{database::Database, repository::Result};
@@ -6,6 +7,22 @@ use crate::{database::Database, repository::Result};
 pub struct User {
     pub uuid: Uuid,
     pub email: String,
+    pub account_uuids: Vec<Uuid>,
+    pub roles: Vec<UserRole>,
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "user_role", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UserRole {
+    Administrator,
+    Member,
+    Viewer,
+}
+
+impl PgHasArrayType for UserRole {
+    fn array_type_info() -> PgTypeInfo {
+        PgTypeInfo::with_name("_user_role")
+    }
 }
 
 #[derive(Clone)]
@@ -24,7 +41,18 @@ impl AuthRepository {
         let sql = r"
             SELECT
                 uuid,
-                email
+                email,
+                ARRAY(
+                    SELECT DISTINCT a.uuid
+                    FROM user_accounts ua
+                    INNER JOIN accounts a ON a.id = ua.account_id
+                    WHERE ua.user_id = users.id
+                ) AS account_uuids,
+                ARRAY(
+                    SELECT DISTINCT ur.role
+                    FROM user_roles ur
+                    WHERE ur.user_id = users.id
+                ) AS roles
             FROM
                 users
             WHERE

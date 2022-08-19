@@ -1,14 +1,14 @@
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
-use axum::Router;
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::{delete, get, patch, post},
+    Extension, Router,
+};
 use miette::Diagnostic;
 use serde_json::json;
 use thiserror::Error;
 
-use crate::api::Json;
-use crate::app::App;
-use crate::repository::RepositoryError;
+use crate::{api::Json, app::App, auth::Identity, repository::RepositoryError};
 
 use super::{ReportRenderer, ReportType};
 
@@ -28,6 +28,7 @@ pub const HEALTH_URI: &str = "/health";
 
 pub fn router() -> Router {
     Router::new()
+        .route("/api/v1/identity", get(identity_handler))
         .route("/api/v1/checks", get(checks::read_all))
         .route("/api/v1/checks/:id", get(checks::read_one))
         .route("/api/v1/checks", post(checks::create))
@@ -64,6 +65,10 @@ pub fn router() -> Router {
 
 async fn health_handler() -> &'static str {
     "UP"
+}
+
+async fn identity_handler(Extension(identity): Extension<Identity>) -> impl IntoResponse {
+    Json(identity)
 }
 
 impl IntoResponse for ApiError {

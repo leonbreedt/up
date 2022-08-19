@@ -9,6 +9,7 @@ mod notification;
 mod project;
 
 pub mod dto {
+    pub use super::auth::{User, UserRole};
     pub use super::check::{
         Check, CheckStatus, CreateCheck, PeriodUnits, ScheduleType, UpdateCheck,
     };
