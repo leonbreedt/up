@@ -171,6 +171,17 @@ impl ProjectRepository {
         uuid: &Uuid,
         request: UpdateProject,
     ) -> Result<Project> {
+        if !identity.is_assigned_to_project(uuid) {
+            tracing::trace!(
+                uuid = uuid.to_string(),
+                "user not assigned to project, aborting update"
+            );
+            return Err(RepositoryError::NotFound {
+                entity_type: ENTITY_PROJECT.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            });
+        }
+
         if !identity.is_administrator() {
             return Err(RepositoryError::Forbidden);
         }
@@ -203,6 +214,17 @@ impl ProjectRepository {
     }
 
     pub async fn delete(&self, identity: &Identity, uuid: &Uuid) -> Result<bool> {
+        if !identity.is_assigned_to_project(uuid) {
+            tracing::trace!(
+                uuid = uuid.to_string(),
+                "user not assigned to project, aborting delete"
+            );
+            return Err(RepositoryError::NotFound {
+                entity_type: ENTITY_PROJECT.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            });
+        }
+
         if !identity.is_administrator() {
             return Err(RepositoryError::Forbidden);
         }
