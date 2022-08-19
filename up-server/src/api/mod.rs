@@ -21,6 +21,8 @@ mod json;
 mod ui;
 mod v1;
 
+pub use v1::{HEALTH_URI, PING_URI};
+
 use crate::{api::json::Json, auth, notifier::Notifier, repository::Repository};
 
 /// Builds a new router, providing handlers with a [`Repository`]

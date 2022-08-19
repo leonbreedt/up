@@ -23,6 +23,9 @@ pub enum ApiError {
     Repository(#[from] RepositoryError),
 }
 
+pub const PING_URI: &str = "/api/v1/ping";
+pub const HEALTH_URI: &str = "/health";
+
 pub fn router() -> Router {
     Router::new()
         .route("/api/v1/checks", get(checks::read_all))
@@ -55,7 +58,12 @@ pub fn router() -> Router {
         .route("/api/v1/projects", post(projects::create))
         .route("/api/v1/projects/:id", patch(projects::update))
         .route("/api/v1/projects/:id", delete(projects::delete))
-        .route("/api/v1/ping/:key", post(ping::ping))
+        .route(HEALTH_URI, get(health_handler))
+        .route(&format!("{}/:key", PING_URI), post(ping::ping))
+}
+
+async fn health_handler() -> &'static str {
+    "UP"
 }
 
 impl IntoResponse for ApiError {

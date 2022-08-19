@@ -6,12 +6,24 @@ use axum::{
 use std::sync::Arc;
 use up_core::jwt;
 
-use crate::{mask, repository};
+use crate::{
+    api::{HEALTH_URI, PING_URI},
+    mask, repository,
+};
+
+const SKIP_AUTH_URIS: &[&str] = &[PING_URI, HEALTH_URI];
 
 pub async fn auth_middleware<B>(
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {
+    for prefix in SKIP_AUTH_URIS {
+        if req.uri().path().starts_with(prefix) {
+            tracing::trace!(path = req.uri().path(), "skipping authorization");
+            return Ok(next.run(req).await);
+        }
+    }
+
     let auth_header = req
         .headers()
         .get(header::AUTHORIZATION)
