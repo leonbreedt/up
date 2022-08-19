@@ -4,6 +4,7 @@ use argh::FromArgs;
 use camino::Utf8PathBuf;
 use openssl::{
     hash::{Hasher, MessageDigest},
+    pkey::Private,
     rsa::Rsa,
 };
 use serde::{Deserialize, Serialize};
@@ -29,21 +30,17 @@ impl GenerateJwks {
 
         let pem = fs::read(&self.key_file_name)?;
         let keypair = Rsa::private_key_from_pem(&pem)?;
-        let public_key_der = keypair.public_key_to_der()?;
-        let mut hasher = Hasher::new(MessageDigest::sha256())?;
-        hasher.update(&public_key_der)?;
-        let digest_bytes = hasher.finish()?;
 
         let n = base64::encode_config(&keypair.n().to_vec(), base64::URL_SAFE_NO_PAD);
         let e = base64::encode_config(&keypair.e().to_vec(), base64::URL_SAFE_NO_PAD);
-        let kid = base64::encode_config(&digest_bytes, base64::URL_SAFE_NO_PAD);
+        let kid = compute_key_id(&keypair)?;
 
-        let jwks = JWKS {
-            keys: vec![JWK {
+        let jwks = Jwks {
+            keys: vec![Jwk {
                 n,
                 e,
-                kty: KeyType::RSA,
-                alg: Some(KeyAlgorithm::RS256),
+                kty: KeyType::Rsa,
+                alg: Some(KeyAlgorithm::Rs256),
                 kid: Some(kid),
             }],
         };
@@ -59,12 +56,12 @@ impl GenerateJwks {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct JWKS {
-    keys: Vec<JWK>,
+struct Jwks {
+    keys: Vec<Jwk>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
-struct JWK {
+struct Jwk {
     kty: KeyType,
     alg: Option<KeyAlgorithm>,
     kid: Option<String>,
@@ -73,11 +70,22 @@ struct JWK {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "UPPERCASE")]
 enum KeyAlgorithm {
-    RS256,
+    Rs256,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "UPPERCASE")]
 enum KeyType {
-    RSA,
+    Rsa,
+}
+
+pub fn compute_key_id(keypair: &Rsa<Private>) -> Result<String, CliError> {
+    let public_key_der = keypair.public_key_to_der()?;
+    let mut hasher = Hasher::new(MessageDigest::sha256())?;
+    hasher.update(&public_key_der)?;
+    let digest_bytes = hasher.finish()?;
+    let kid = base64::encode_config(&digest_bytes, base64::URL_SAFE_NO_PAD);
+    Ok(kid)
 }

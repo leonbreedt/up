@@ -2,7 +2,6 @@ use std::fs;
 
 use argh::FromArgs;
 use camino::Utf8PathBuf;
-use openssl::x509::extension::{ExtendedKeyUsage, SubjectAlternativeName};
 use openssl::{
     asn1::Asn1Time,
     bn::{BigNum, MsbOption},
@@ -12,7 +11,10 @@ use openssl::{
     rsa::Rsa,
     symm::Cipher,
     x509::{
-        extension::{AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier},
+        extension::{
+            AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
+            SubjectAlternativeName, SubjectKeyIdentifier,
+        },
         X509Name, X509,
     },
 };

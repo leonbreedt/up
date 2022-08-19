@@ -10,6 +10,8 @@ pub enum CliError {
     OpenSSLError(#[from] openssl::error::ErrorStack),
     #[error("I/O error: {0}")]
     IOError(#[from] std::io::Error),
+    #[error("JSON serialization error: {0}")]
+    JSONSerializationError(#[from] serde_json::Error),
 }
 
 /// Command-line interface for UP admin and operations tasks.

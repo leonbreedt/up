@@ -5,6 +5,7 @@ use crate::CliError;
 mod ca_certificate;
 mod certificate;
 mod jwks;
+mod jwt;
 mod keypair;
 
 /// Generates keys and certificates.
@@ -22,6 +23,7 @@ pub enum GenerateSubCommand {
     CACertificate(ca_certificate::GenerateCACertificateCommand),
     Certificate(certificate::GenerateCertificateCommand),
     Jwks(jwks::GenerateJwks),
+    Jwt(jwt::GenerateJwt),
 }
 
 impl GenerateCommand {
@@ -31,6 +33,7 @@ impl GenerateCommand {
             GenerateSubCommand::CACertificate(cmd) => cmd.run().await,
             GenerateSubCommand::Certificate(cmd) => cmd.run().await,
             GenerateSubCommand::Jwks(cmd) => cmd.run().await,
+            GenerateSubCommand::Jwt(cmd) => cmd.run().await,
         }
     }
 }
