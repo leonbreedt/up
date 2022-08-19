@@ -10,7 +10,7 @@ use crate::{
     CliError,
 };
 
-/// Issue JSON Web Token signed by a key in a given file.
+/// Verify JSON Web Token signed by a key in a given file.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "jwt")]
 pub struct VerifyJwt {

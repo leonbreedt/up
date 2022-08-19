@@ -1,4 +1,5 @@
 use argh::FromArgs;
+use dotenv::dotenv;
 use thiserror::Error;
 use tracing_subscriber::EnvFilter;
 
@@ -44,6 +45,8 @@ impl RootCommand {
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
+
     if std::env::var_os("RUST_BACKTRACE").is_none() {
         std::env::set_var("RUST_BACKTRACE", "1")
     }

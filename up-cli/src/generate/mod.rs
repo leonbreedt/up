@@ -7,6 +7,7 @@ pub mod certificate;
 pub mod jwks;
 pub mod jwt;
 pub mod keypair;
+pub mod server_env;
 
 /// Generates keys and certificates.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -24,6 +25,7 @@ pub enum GenerateSubCommand {
     Certificate(certificate::GenerateCertificateCommand),
     Jwks(jwks::GenerateJwks),
     Jwt(jwt::GenerateJwt),
+    ServerEnv(server_env::GenerateServerEnv),
 }
 
 impl GenerateCommand {
@@ -34,6 +36,7 @@ impl GenerateCommand {
             GenerateSubCommand::Certificate(cmd) => cmd.run().await,
             GenerateSubCommand::Jwks(cmd) => cmd.run().await,
             GenerateSubCommand::Jwt(cmd) => cmd.run().await,
+            GenerateSubCommand::ServerEnv(cmd) => cmd.run().await,
         }
     }
 }
