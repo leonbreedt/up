@@ -1,0 +1,16 @@
+[package]
+name = "up-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alcoholic_jwt = "4091.0.0"
+base64 = "0.13.0"
+chrono = { version = "0.4.22", features = ["serde"] }
+openssl = "0.10.41"
+serde = { version = "1.0.143", features = ["derive"] }
+serde_json = "1.0.83"
+thiserror = "1.0.32"
+time = { version = "0.3.13", features = ["serde"] }
+tracing = "0.1.36"
+

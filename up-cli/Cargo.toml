@@ -1,0 +1,26 @@
+[package]
+name = "up-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "upcli"
+path = "src/main.rs"
+
+[dependencies]
+up-core = { path = "../up-core" }
+
+argh = "0.1.8"
+base64 = "0.13.0"
+camino = "1.1.1"
+chrono = { version = "0.4.22", features = ["serde"] }
+dotenv = "0.15.0"
+openssl = "0.10.41"
+rpassword = "7.0.0"
+serde = { version = "1.0.143", features = ["derive"] }
+serde_json = "1.0.83"
+thiserror = "1.0.32"
+time = { version = "0.3.13", features = ["serde"] }
+tokio = { version = "1.20.1", features = ["full"] }
+tracing = "0.1.36"
+tracing-subscriber = { version = "0.3.15", features = ["env-filter", "json"] }

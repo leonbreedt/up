@@ -1,10 +1,14 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use argh::FromArgs;
 use dotenv::dotenv;
-use miette::{IntoDiagnostic, Result};
+use miette::{Diagnostic, IntoDiagnostic, Result};
+use thiserror::Error;
 use tracing_subscriber::EnvFilter;
+use up_core::jwt::{self, DEFAULT_AUDIENCE, DEFAULT_ISSUER};
+use up_core::JWKS_ENV;
 
 use crate::{api, database, integrations, jobs, notifier::Notifier, repository::Repository};
 
@@ -12,6 +16,16 @@ static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 
 pub struct App {
     args: Args,
+}
+
+#[derive(Error, Diagnostic, Debug)]
+pub enum AppError {
+    #[error("required environment variable {name} is not set, required for {purpose}")]
+    #[diagnostic(code(up::error::env))]
+    MissingEnvironmentVariable { name: String, purpose: String },
+    #[error("configuration error: {0}")]
+    #[diagnostic(code(up::error::configuration))]
+    ConfigurationError(#[from] up_core::Error),
 }
 
 impl App {
@@ -51,6 +65,20 @@ impl App {
                 .init();
         }
 
+        let jwks = env_or_error(JWKS_ENV, "JWT verification")?;
+
+        let jwt_verifier = Arc::new(
+            jwt::Verifier::new_from_jwks(&jwks, Some(DEFAULT_ISSUER), Some(DEFAULT_AUDIENCE))
+                .map_err(AppError::ConfigurationError)?,
+        );
+
+        let key_ids = jwt_verifier.key_ids();
+        tracing::debug!(
+            "using {} key(s) to verify JWTs: {}",
+            key_ids.len(),
+            key_ids.join(", ")
+        );
+
         let database = database::connect(
             &self.args.database_url,
             1,
@@ -67,7 +95,7 @@ impl App {
         let mut send_alerts_job =
             jobs::SendAlerts::with_repository(repository.clone(), notifier.clone());
 
-        let router = api::build(repository, notifier);
+        let router = api::build(repository, notifier, jwt_verifier);
 
         tracing::debug!(
             ip = self.args.listen_address.ip().to_string().as_str(),
@@ -166,5 +194,16 @@ fn default_database_max_connections() -> u32 {
             .unwrap_or(DEFAULT_DATABASE_MAX_CONNECTIONS)
     } else {
         DEFAULT_DATABASE_MAX_CONNECTIONS
+    }
+}
+
+fn env_or_error(name: &str, purpose: &str) -> Result<String, AppError> {
+    if let Ok(value) = std::env::var(name) {
+        Ok(value)
+    } else {
+        Err(AppError::MissingEnvironmentVariable {
+            name: name.to_string(),
+            purpose: purpose.to_string(),
+        })
     }
 }

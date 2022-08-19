@@ -15,13 +15,15 @@ CREATE TABLE IF NOT EXISTS users (
     id          BIGSERIAL PRIMARY KEY,
     uuid        UUID NOT NULL DEFAULT gen_random_uuid(),
     shortid     TEXT NOT NULL,
+    subject     TEXT NOT NULL,
     email       TEXT NOT NULL,
     created_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
     updated_at  TIMESTAMP WITHOUT TIME ZONE,
     deleted     BOOLEAN NOT NULL DEFAULT false,
     deleted_at  TIMESTAMP WITHOUT TIME ZONE,
     CONSTRAINT  users_unique_uuid UNIQUE (uuid),
-    CONSTRAINT  users_unique_shortid UNIQUE (shortid)
+    CONSTRAINT  users_unique_shortid UNIQUE (shortid),
+    CONSTRAINT  users_unique_subject UNIQUE (subject)
 );
 
 CREATE TABLE IF NOT EXISTS user_accounts (

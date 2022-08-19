@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     body::{boxed, Bytes},
     handler::Handler,
@@ -13,22 +15,24 @@ use hyper::{
 };
 use miette::{Diagnostic, GraphicalReportHandler, JSONReportHandler, NarratableReportHandler};
 use serde_json::json;
+use up_core::jwt::Verifier;
 
 mod json;
 mod ui;
 mod v1;
 
-use crate::notifier::Notifier;
-use crate::{api::json::Json, repository::Repository};
+use crate::{api::json::Json, auth, notifier::Notifier, repository::Repository};
 
 /// Builds a new router, providing handlers with a [`Repository`]
 /// connected to the specified [`Database`].
-pub fn build(repository: Repository, notifier: Notifier) -> Router {
+pub fn build(repository: Repository, notifier: Notifier, verifier: Arc<Verifier>) -> Router {
     let router = v1::router()
         .route("/", get(ui::index_handler))
-        .layer(Extension(repository))
         .layer(Extension(notifier))
         .layer(middleware::from_fn(error_middleware))
+        .layer(middleware::from_fn(auth::auth_middleware))
+        .layer(Extension(repository))
+        .layer(Extension(verifier))
         .fallback(not_found_handler.into_service());
 
     ui::Asset::register_routes(router)

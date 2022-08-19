@@ -1,8 +1,9 @@
-use std::{fmt::Debug, hash::Hash, str::FromStr};
+use std::fmt::Debug;
 
 use miette::Diagnostic;
 use thiserror::Error;
 
+mod auth;
 mod check;
 mod notification;
 mod project;
@@ -17,6 +18,7 @@ pub mod dto {
     pub use super::project::{CreateProject, Project, UpdateProject};
 }
 
+use auth::AuthRepository;
 use check::CheckRepository;
 use notification::NotificationRepository;
 use project::ProjectRepository;
@@ -25,15 +27,9 @@ use crate::database::Database;
 
 type Result<T> = miette::Result<T, RepositoryError>;
 
-/// Represents a field in a DTO (can be used in queries, parse from
-/// strings, converted to strings, and used as map keys).
-pub trait ModelField: Debug + Clone + Hash + PartialEq + Eq + FromStr + AsRef<str> {
-    fn all() -> &'static [Self];
-    fn updatable() -> &'static [Self];
-}
-
 #[derive(Clone)]
 pub struct Repository {
+    auth: AuthRepository,
     check: CheckRepository,
     project: ProjectRepository,
     notification: NotificationRepository,
@@ -54,22 +50,30 @@ pub enum RepositoryError {
 
 impl Repository {
     pub fn new(database: Database) -> Self {
+        let auth = AuthRepository::new(database.clone());
         let project = ProjectRepository::new(database.clone());
         let check = CheckRepository::new(database.clone());
         let notification = NotificationRepository::new(database);
         Self {
+            auth,
             check,
             project,
             notification,
         }
     }
 
+    pub fn auth(&self) -> &AuthRepository {
+        &self.auth
+    }
+
     pub fn check(&self) -> &CheckRepository {
         &self.check
     }
+
     pub fn project(&self) -> &ProjectRepository {
         &self.project
     }
+
     pub fn notification(&self) -> &NotificationRepository {
         &self.notification
     }
