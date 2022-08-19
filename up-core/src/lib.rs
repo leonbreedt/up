@@ -12,6 +12,10 @@ pub enum Error {
     JSONSerializationError(#[from] serde_json::Error),
     #[error("JWT validation error: {0}")]
     JWTVerificationError(#[from] alcoholic_jwt::ValidationError),
-    #[error("JWT has no key ID, or not found in key set")]
+    #[error("JWT has no key ID, or not found in keys")]
     JWTMissingKid,
 }
+
+pub const CA_CERTIFICATE_ENV: &str = "CA_CERTIFICATE";
+pub const SERVER_CERTIFICATE_ENV: &str = "SERVER_CERTIFICATE";
+pub const JWKS_ENV: &str = "JWKS";

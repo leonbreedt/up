@@ -4,11 +4,15 @@ use chrono::{
     {Duration, Utc},
 };
 use openssl::hash::Hasher;
-use openssl::pkey::{PKey, Private};
-use openssl::{hash::MessageDigest, rsa::Rsa, sign::Signer};
+use openssl::pkey::{PKey, Private, Public};
+use openssl::{hash::MessageDigest, sign::Signer};
 use serde::{Deserialize, Serialize};
 
+use crate::jwks::Jwks;
 use crate::{auth::Role, Error};
+
+pub const DEFAULT_ISSUER: &str = "up.sector42.io/auth";
+pub const DEFAULT_AUDIENCE: &str = "up.sector42.io/server";
 
 pub struct Generator {
     private_key: PKey<Private>,
@@ -20,14 +24,18 @@ pub struct Generator {
 impl Generator {
     pub fn new_from_pem(pem: &[u8], issuer: &str, audience: &str) -> Result<Self, Error> {
         let private_key = PKey::private_key_from_pem(pem)?;
-        let rsa_key = private_key.rsa()?;
-        let key_id = compute_key_id(&rsa_key)?;
+        let public_key = PKey::public_key_from_pem(pem)?;
+        let key_id = compute_key_id(&public_key)?;
         Ok(Self {
             private_key,
             key_id,
             issuer: issuer.to_string(),
             audience: audience.to_owned(),
         })
+    }
+
+    pub fn key_id(&self) -> &str {
+        &self.key_id
     }
 
     pub fn generate(
@@ -68,6 +76,7 @@ impl Generator {
 
 pub struct Verifier {
     jwks: alcoholic_jwt::JWKS,
+    internal_jwks: Jwks,
     issuer: Option<String>,
     audience: Option<String>,
 }
@@ -78,11 +87,17 @@ impl Verifier {
         issuer: Option<&str>,
         audience: Option<&str>,
     ) -> Result<Self, Error> {
+        let internal_jwks: Jwks = serde_json::from_str(jwks)?;
         Ok(Self {
             jwks: serde_json::from_str(jwks)?,
+            internal_jwks,
             issuer: issuer.map(|i| i.to_string()),
             audience: audience.map(|i| i.to_string()),
         })
+    }
+
+    pub fn key_ids(&self) -> Vec<&str> {
+        self.internal_jwks.key_ids()
     }
 
     pub fn verify(&self, jwt: &str) -> Result<Claims, Error> {
@@ -109,8 +124,8 @@ impl Verifier {
     }
 }
 
-pub fn compute_key_id(rsa_key: &Rsa<Private>) -> Result<String, Error> {
-    let public_key_der = rsa_key.public_key_to_der()?;
+pub fn compute_key_id(public_key: &PKey<Public>) -> Result<String, Error> {
+    let public_key_der = public_key.public_key_to_der()?;
     let mut hasher = Hasher::new(MessageDigest::sha256())?;
     hasher.update(&public_key_der)?;
     let digest_bytes = hasher.finish()?;

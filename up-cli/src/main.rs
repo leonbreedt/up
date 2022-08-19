@@ -18,6 +18,8 @@ pub enum CliError {
     JWTJWKSGenerationError(#[source] up_core::Error),
     #[error("JWT verification failed: {0}")]
     JWTVerificationError(#[source] up_core::Error),
+    #[error("required environment variable {name} is not set, required for {purpose}")]
+    MissingEnvironmentVariable { name: String, purpose: String },
 }
 
 /// Command-line interface for UP admin and operations tasks.

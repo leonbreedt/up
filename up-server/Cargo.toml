@@ -5,6 +5,8 @@ edition = "2021"
 default-run = "up-server"
 
 [dependencies]
+up-core = { path = "../up-core" }
+
 anyhow = { version = "1.0.60", features = ["std", "backtrace"] }
 argh = "0.1.8"
 async-trait = "0.1.57"

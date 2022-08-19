@@ -3,12 +3,9 @@ use std::fs;
 use argh::FromArgs;
 use camino::Utf8PathBuf;
 use serde_json::json;
-use up_core::jwt;
+use up_core::jwt::{self, DEFAULT_AUDIENCE, DEFAULT_ISSUER};
 
-use crate::{
-    generate::jwt::{DEFAULT_AUDIENCE, DEFAULT_ISSUER},
-    CliError,
-};
+use crate::CliError;
 
 /// Verify JSON Web Token signed by a key in a given file.
 #[derive(FromArgs, PartialEq, Eq, Debug)]

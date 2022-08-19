@@ -40,3 +40,14 @@ impl GenerateCommand {
         }
     }
 }
+
+fn env_or_error(name: &str, purpose: &str) -> Result<String, CliError> {
+    if let Ok(value) = std::env::var(name) {
+        Ok(value)
+    } else {
+        Err(CliError::MissingEnvironmentVariable {
+            name: name.to_string(),
+            purpose: purpose.to_string(),
+        })
+    }
+}

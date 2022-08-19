@@ -2,25 +2,24 @@ use std::fs;
 
 use argh::FromArgs;
 use camino::Utf8PathBuf;
-use up_core::jwt;
+use up_core::jwt::{self, DEFAULT_AUDIENCE, DEFAULT_ISSUER};
+use up_core::SERVER_CERTIFICATE_ENV;
 
+use crate::generate::env_or_error;
 use crate::CliError;
-
-pub const DEFAULT_ISSUER: &str = "up.sector42.io/auth";
-pub const DEFAULT_AUDIENCE: &str = "up.sector42.io/auth";
 
 /// Issue JSON Web Token signed by a key in a given file.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
 #[argh(subcommand, name = "jwt")]
 pub struct GenerateJwt {
     /// path to PEM file containing signing key
-    #[argh(positional)]
-    key_file_name: Utf8PathBuf,
+    #[argh(option)]
+    key_file: Option<Utf8PathBuf>,
     /// path to output JWT file
-    #[argh(positional)]
-    file_name: Utf8PathBuf,
+    #[argh(option)]
+    jwt_file: Option<Utf8PathBuf>,
     /// subject the JWT is issued for, e.g. anonymized user ID.
-    #[argh(positional)]
+    #[argh(option)]
     subject: String,
     /// name of issuer (default: up.sector42.io/auth)
     #[argh(option, default = "DEFAULT_ISSUER.to_string()")]
@@ -35,9 +34,21 @@ pub struct GenerateJwt {
 
 impl GenerateJwt {
     pub async fn run(&self) -> Result<(), CliError> {
-        tracing::info!("issuing JWT signed by key in {}", self.key_file_name,);
+        let pem = if let Some(key_file) = &self.key_file {
+            let pem = fs::read(key_file)?;
+            tracing::info!("issuing JWT signed by key in {}", key_file);
+            pem
+        } else {
+            let pem = env_or_error(SERVER_CERTIFICATE_ENV, "JWT generation")?
+                .as_bytes()
+                .to_vec();
+            tracing::info!(
+                "issuing JWT signed by key from environment variable {}",
+                SERVER_CERTIFICATE_ENV
+            );
+            pem
+        };
 
-        let pem = fs::read(&self.key_file_name)?;
         let generator = jwt::Generator::new_from_pem(&pem, &self.issuer, &self.audience)
             .map_err(CliError::JWTJWKSGenerationError)?;
 
@@ -45,8 +56,14 @@ impl GenerateJwt {
             .generate(&self.subject, self.expiry_hours, None)
             .map_err(CliError::JWTJWKSGenerationError)?;
 
-        tracing::info!("saving JWT to {}", self.file_name);
-        fs::write(&self.file_name, jwt.as_bytes())?;
+        tracing::info!("generated JWT signed by key ID {}", generator.key_id());
+
+        if let Some(jwt_file) = &self.jwt_file {
+            tracing::info!("saving JWT to {}", jwt_file);
+            fs::write(jwt_file, jwt.as_bytes())?;
+        } else {
+            println!("{}", jwt);
+        }
 
         Ok(())
     }

@@ -1,3 +1,4 @@
+use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -12,11 +13,12 @@ pub struct Jwks {
 
 impl Jwks {
     pub fn from_pem(pem: &[u8]) -> Result<Self, Error> {
-        let keypair = Rsa::private_key_from_pem(pem)?;
+        let private_key = Rsa::private_key_from_pem(pem)?;
+        let public_key = PKey::public_key_from_pem(pem)?;
 
-        let n = base64::encode_config(&keypair.n().to_vec(), base64::URL_SAFE_NO_PAD);
-        let e = base64::encode_config(&keypair.e().to_vec(), base64::URL_SAFE_NO_PAD);
-        let kid = jwt::compute_key_id(&keypair)?;
+        let n = base64::encode_config(&private_key.n().to_vec(), base64::URL_SAFE_NO_PAD);
+        let e = base64::encode_config(&private_key.e().to_vec(), base64::URL_SAFE_NO_PAD);
+        let kid = jwt::compute_key_id(&public_key)?;
 
         Ok(Self {
             keys: vec![Jwk {
@@ -27,6 +29,13 @@ impl Jwks {
                 kid: Some(kid),
             }],
         })
+    }
+
+    pub fn key_ids(&self) -> Vec<&str> {
+        self.keys
+            .iter()
+            .map(|k| k.kid.as_deref().unwrap())
+            .collect()
     }
 }
 

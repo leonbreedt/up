@@ -2,7 +2,7 @@ use std::fs;
 
 use argh::FromArgs;
 use camino::Utf8PathBuf;
-use up_core::jwks;
+use up_core::{jwks, CA_CERTIFICATE_ENV, JWKS_ENV, SERVER_CERTIFICATE_ENV};
 
 use crate::{
     generate::{ca_certificate, certificate},
@@ -48,14 +48,14 @@ impl GenerateServerEnv {
 
         let mut dot_env = String::new();
         dot_env.push_str(&env_line(
-            "CA_CERTIFICATE",
+            CA_CERTIFICATE_ENV,
             std::str::from_utf8(&ca_certificate_bundle).unwrap(),
         ));
         dot_env.push_str(&env_line(
-            "SERVER_CERTIFICATE",
-            std::str::from_utf8(&ca_certificate_bundle).unwrap(),
+            SERVER_CERTIFICATE_ENV,
+            std::str::from_utf8(&certificate_bundle).unwrap(),
         ));
-        dot_env.push_str(&env_line("JWKS", &jwks.to_string()));
+        dot_env.push_str(&env_line(JWKS_ENV, &jwks.to_string()));
 
         tracing::info!("saving to {}", self.file_name);
 
