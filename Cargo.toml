@@ -1,2 +1,2 @@
 [workspace]
-members = ["up-server", "up-cli"]
+members = ["up-server", "up-cli", "up-core"]

@@ -38,6 +38,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "alcoholic_jwt"
+version = "4091.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb8a1270ac7729a671a2d0f7d959e6572330d4da9f6b797165f6b08244019b9e"
+dependencies = [
+ "base64",
+ "openssl",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2359,6 +2372,22 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "up-core",
+]
+
+[[package]]
+name = "up-core"
+version = "0.1.0"
+dependencies = [
+ "alcoholic_jwt",
+ "base64",
+ "chrono",
+ "openssl",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time 0.3.13",
+ "tracing",
 ]
 
 [[package]]

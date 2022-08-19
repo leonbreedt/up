@@ -3,6 +3,7 @@ use thiserror::Error;
 use tracing_subscriber::EnvFilter;
 
 mod generate;
+mod verify;
 
 #[derive(Error, Debug)]
 pub enum CliError {
@@ -12,6 +13,10 @@ pub enum CliError {
     IOError(#[from] std::io::Error),
     #[error("JSON serialization error: {0}")]
     JSONSerializationError(#[from] serde_json::Error),
+    #[error("JWT/JWKS generation failed: {0}")]
+    JWTJWKSGenerationError(#[source] up_core::Error),
+    #[error("JWT verification failed: {0}")]
+    JWTVerificationError(#[source] up_core::Error),
 }
 
 /// Command-line interface for UP admin and operations tasks.
@@ -25,12 +30,14 @@ pub struct Arguments {
 #[argh(subcommand)]
 pub enum RootCommand {
     Generate(generate::GenerateCommand),
+    Verify(verify::VerifyCommand),
 }
 
 impl RootCommand {
     pub async fn run(&self) -> Result<(), CliError> {
         match self {
             RootCommand::Generate(cmd) => cmd.run().await,
+            RootCommand::Verify(cmd) => cmd.run().await,
         }
     }
 }

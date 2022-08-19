@@ -2,11 +2,11 @@ use argh::FromArgs;
 
 use crate::CliError;
 
-mod ca_certificate;
-mod certificate;
-mod jwks;
-mod jwt;
-mod keypair;
+pub mod ca_certificate;
+pub mod certificate;
+pub mod jwks;
+pub mod jwt;
+pub mod keypair;
 
 /// Generates keys and certificates.
 #[derive(FromArgs, PartialEq, Eq, Debug)]
