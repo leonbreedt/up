@@ -1,4 +1,4 @@
-use sqlx::postgres::{PgHasArrayType, PgTypeInfo};
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{database::Database, repository::Result};
@@ -10,7 +10,7 @@ pub struct User {
     pub email: String,
     pub account_ids: Vec<String>,
     pub project_ids: Vec<String>,
-    pub roles: Vec<UserRole>,
+    pub roles: Vec<String>,
 }
 
 #[derive(sqlx::Type)]
@@ -21,9 +21,16 @@ pub enum UserRole {
     Viewer,
 }
 
-impl PgHasArrayType for UserRole {
-    fn array_type_info() -> PgTypeInfo {
-        PgTypeInfo::with_name("_user_role")
+impl FromStr for UserRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "ADMINISTRATOR" => Ok(UserRole::Administrator),
+            "MEMBER" => Ok(UserRole::Member),
+            "VIEWER" => Ok(UserRole::Viewer),
+            _ => Err(format!("{} is not a supported role value", s)),
+        }
     }
 }
 
@@ -58,7 +65,7 @@ impl AuthRepository {
                     WHERE up.user_id = users.id
                 ) AS project_ids,
                 ARRAY(
-                    SELECT DISTINCT ur.role
+                    SELECT DISTINCT ur.role || '|' || ur.account_id
                     FROM user_roles ur
                     WHERE ur.user_id = users.id
                 ) AS roles

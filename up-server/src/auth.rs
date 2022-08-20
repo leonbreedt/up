@@ -34,15 +34,34 @@ pub struct Identity {
     #[serde(skip_serializing)]
     pub project_ids: HashMap<Uuid, i64>,
     pub email: String,
-    pub roles: Vec<Role>,
+    #[serde(skip_serializing)]
+    pub roles: HashMap<i64, Vec<Role>>,
 }
 
 const ENTITY_ACCOUNT: &str = "account";
 const ENTITY_PROJECT: &str = "project";
 
 impl Identity {
-    pub fn is_administrator(&self) -> bool {
-        self.roles.contains(&Role::Administrator)
+    pub fn is_administrator_in_account(&self, uuid: &Uuid) -> bool {
+        self.has_role_in_account(uuid, Role::Administrator)
+    }
+
+    pub fn is_administrator_in_account_with_id(&self, id: i64) -> bool {
+        self.has_role_in_account_with_id(id, Role::Administrator)
+    }
+
+    pub fn has_role_in_account(&self, uuid: &Uuid, role: Role) -> bool {
+        self.account_ids
+            .get(uuid)
+            .map(|id| self.has_role_in_account_with_id(*id, role))
+            .unwrap_or(false)
+    }
+
+    pub fn has_role_in_account_with_id(&self, id: i64, role: Role) -> bool {
+        self.roles
+            .get(&id)
+            .map(|r| r.contains(&role))
+            .unwrap_or(false)
     }
 
     pub fn is_assigned_to_account(&self, uuid: &Uuid) -> bool {
@@ -112,8 +131,8 @@ impl Identity {
     }
 }
 
-impl From<&UserRole> for Role {
-    fn from(role: &UserRole) -> Self {
+impl From<UserRole> for Role {
+    fn from(role: UserRole) -> Self {
         match role {
             UserRole::Administrator => Role::Administrator,
             UserRole::Member => Role::Member,
@@ -130,9 +149,24 @@ impl From<User> for Identity {
             account_ids: to_uuid_and_id_map(u.account_ids),
             project_ids: to_uuid_and_id_map(u.project_ids),
             email: u.email,
-            roles: u.roles.iter().map(|r| r.into()).collect(),
+            roles: to_role_and_id_map(u.roles),
         }
     }
+}
+
+fn to_role_and_id_map(items: Vec<String>) -> HashMap<i64, Vec<Role>> {
+    let mut map = HashMap::new();
+    for item in items {
+        let parsed: Vec<_> = item.split("|").collect();
+        let account_id: i64 = parsed[1].parse().unwrap();
+        let user_role: UserRole = parsed[0].parse().unwrap();
+        let role: Role = user_role.into();
+        let roles = map.entry(account_id).or_insert_with(Vec::new);
+        if !roles.contains(&role) {
+            roles.push(role);
+        }
+    }
+    map
 }
 
 fn to_uuid_and_id_map(items: Vec<String>) -> HashMap<Uuid, i64> {

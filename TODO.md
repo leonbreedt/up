@@ -6,6 +6,8 @@
   - only an editor can create/update/delete checks in projects
   - a viewer cannot change any data
 
+- add unit tests
+
 - add JWT issuing to server via simple login endpoint
   - use CA_CERTIFICATE, CERTIFICATE
 

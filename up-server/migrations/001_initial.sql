@@ -17,14 +17,6 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT users_unique_subject UNIQUE (subject)
 );
 
-CREATE TYPE user_role AS ENUM ('ADMINISTRATOR', 'MEMBER', 'VIEWER');
-
-CREATE TABLE IF NOT EXISTS user_roles (
-    user_id    BIGINT NOT NULL REFERENCES users (id),
-    role       user_role NOT NULL,
-    PRIMARY KEY (user_id, role)
-);
-
 CREATE TABLE IF NOT EXISTS accounts (
     id         BIGSERIAL PRIMARY KEY,
     uuid       UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -40,15 +32,24 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT accounts_unique_shortid UNIQUE (shortid)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS users_unique_email
+    ON users (email)
+    WHERE deleted = false;
+
 CREATE TABLE IF NOT EXISTS user_accounts (
     user_id    BIGINT NOT NULL REFERENCES users (id),
     account_id BIGINT NOT NULL REFERENCES accounts (id),
     PRIMARY KEY (user_id, account_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS users_unique_email
-ON users (email)
-WHERE deleted = false;
+CREATE TYPE user_role AS ENUM ('ADMINISTRATOR', 'MEMBER', 'VIEWER');
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id    BIGINT NOT NULL REFERENCES users (id),
+    account_id BIGINT NOT NULL REFERENCES accounts (id),
+    role       user_role NOT NULL,
+    PRIMARY KEY (user_id, role)
+);
 
 CREATE TABLE IF NOT EXISTS projects (
     id         BIGSERIAL PRIMARY KEY,
