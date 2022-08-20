@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -11,8 +12,13 @@ use uuid::Uuid;
 
 use crate::{
     api::{HEALTH_URI, PING_URI},
-    mask, repository,
-    repository::dto::{User, UserRole},
+    mask,
+    repository::{
+        self,
+        dto::{User, UserRole},
+        RepositoryError,
+    },
+    shortid::ShortId,
 };
 
 const SKIP_AUTH_URIS: &[&str] = &[PING_URI, HEALTH_URI];
@@ -24,24 +30,85 @@ pub struct Identity {
     #[serde(skip_serializing)]
     pub user_uuid: Uuid,
     #[serde(skip_serializing)]
-    pub account_uuids: Vec<Uuid>,
+    pub account_ids: HashMap<Uuid, i64>,
     #[serde(skip_serializing)]
-    pub project_uuids: Vec<Uuid>,
+    pub project_ids: HashMap<Uuid, i64>,
     pub email: String,
     pub roles: Vec<Role>,
 }
+
+const ENTITY_ACCOUNT: &str = "account";
+const ENTITY_PROJECT: &str = "project";
 
 impl Identity {
     pub fn is_administrator(&self) -> bool {
         self.roles.contains(&Role::Administrator)
     }
 
-    pub fn is_assigned_to_project(&self, uuid: &Uuid) -> bool {
-        self.project_uuids.contains(uuid)
+    pub fn is_assigned_to_account(&self, uuid: &Uuid) -> bool {
+        self.account_ids.contains_key(uuid)
     }
 
-    pub fn is_assigned_to_account(&self, uuid: &Uuid) -> bool {
-        self.account_uuids.contains(uuid)
+    pub fn is_assigned_to_project(&self, uuid: &Uuid) -> bool {
+        self.project_ids.contains_key(uuid)
+    }
+
+    pub fn get_account_id(&self, account_uuid: &Uuid) -> Result<i64, RepositoryError> {
+        self.account_ids
+            .get(account_uuid)
+            .map(|id| *id)
+            .ok_or(RepositoryError::NotFound {
+                entity_type: ENTITY_ACCOUNT.to_string(),
+                id: ShortId::from_uuid(account_uuid).to_string(),
+            })
+    }
+
+    pub fn get_project_id(&self, project_uuid: &Uuid) -> Result<i64, RepositoryError> {
+        self.project_ids
+            .get(project_uuid)
+            .map(|id| *id)
+            .ok_or(RepositoryError::NotFound {
+                entity_type: ENTITY_PROJECT.to_string(),
+                id: ShortId::from_uuid(project_uuid).to_string(),
+            })
+    }
+
+    pub fn project_ids(&self) -> Vec<i64> {
+        self.project_ids.values().map(|v| *v).collect()
+    }
+
+    pub fn account_ids(&self) -> Vec<i64> {
+        self.account_ids.values().map(|v| *v).collect()
+    }
+
+    pub fn ensure_assigned_to_account(&self, uuid: &Uuid) -> Result<(), RepositoryError> {
+        if !self.is_assigned_to_account(uuid) {
+            tracing::trace!(
+                user_uuid = self.user_uuid.to_string(),
+                account_uuid = uuid.to_string(),
+                "user not assigned to account, rejecting API call"
+            );
+            return Err(RepositoryError::NotFound {
+                entity_type: ENTITY_ACCOUNT.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn ensure_assigned_to_project(&self, uuid: &Uuid) -> Result<(), RepositoryError> {
+        if !self.is_assigned_to_project(uuid) {
+            tracing::trace!(
+                user_uuid = self.user_uuid.to_string(),
+                project_uuid = uuid.to_string(),
+                "user not assigned to project, rejecting API call"
+            );
+            return Err(RepositoryError::NotFound {
+                entity_type: ENTITY_PROJECT.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -60,12 +127,24 @@ impl From<User> for Identity {
         Self {
             user_id: u.id,
             user_uuid: u.uuid,
-            account_uuids: u.account_uuids,
-            project_uuids: u.project_uuids,
+            account_ids: to_uuid_and_id_map(u.account_ids),
+            project_ids: to_uuid_and_id_map(u.project_ids),
             email: u.email,
             roles: u.roles.iter().map(|r| r.into()).collect(),
         }
     }
+}
+
+fn to_uuid_and_id_map(items: Vec<String>) -> HashMap<Uuid, i64> {
+    HashMap::from_iter(
+        items
+            .iter()
+            .map(|v| {
+                let parsed: Vec<_> = v.split("|").collect();
+                (parsed[0].parse().unwrap(), parsed[1].parse().unwrap())
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 pub async fn auth_middleware<B>(
@@ -114,8 +193,10 @@ pub async fn auth_middleware<B>(
                 tracing::trace!(
                     user_uuid = identity.user_uuid.to_string(),
                     email = mask::email(&identity.email),
-                    account_uuids = format!("{:?}", identity.account_uuids),
-                    project_uuids = format!("{:?}", identity.project_uuids),
+                    account_uuids =
+                        format!("{:?}", identity.account_ids.keys().collect::<Vec<_>>()),
+                    project_uuids =
+                        format!("{:?}", identity.project_ids.keys().collect::<Vec<_>>()),
                     roles = format!("{:?}", identity.roles),
                     "user authorized"
                 );

@@ -3,28 +3,36 @@ use chrono::{DateTime, TimeZone, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::Identity;
 use crate::{
     api::{v1::ApiError, Json},
     repository::{dto, Repository},
     shortid::ShortId,
 };
 
-/// Handler for `GET /api/v1/checks/:id`
+/// Handler for `GET /api/v1/projects/:id/checks/:id`
 pub async fn read_one(
-    Path(id): Path<ShortId>,
+    Path((project_id, check_id)): Path<(ShortId, ShortId)>,
+    Extension(identity): Extension<Identity>,
     repository: Extension<Repository>,
 ) -> Result<Json<Check>, ApiError> {
-    let check: Check = repository.check().read_one(id.as_uuid()).await?.into();
+    let check: Check = repository
+        .check()
+        .read_one(&identity, project_id.as_uuid(), check_id.as_uuid())
+        .await?
+        .into();
     Ok(check.into())
 }
 
-/// Handler for `GET /api/v1/checks`
+/// Handler for `GET /api/v1/projects/:id/checks`
 pub async fn read_all(
+    Path(project_id): Path<ShortId>,
+    Extension(identity): Extension<Identity>,
     Extension(repository): Extension<Repository>,
 ) -> Result<Json<Vec<Check>>, ApiError> {
     let checks: Vec<Check> = repository
         .check()
-        .read_all()
+        .read_all(&identity, project_id.as_uuid())
         .await?
         .into_iter()
         .map(|i| i.into())
@@ -32,24 +40,36 @@ pub async fn read_all(
     Ok(checks.into())
 }
 
-/// Handler for `POST /api/v1/checks`
+/// Handler for `POST /api/v1/projects/:id/checks`
 pub async fn create(
-    repository: Extension<Repository>,
+    Path(project_id): Path<ShortId>,
+    Extension(identity): Extension<Identity>,
+    Extension(repository): Extension<Repository>,
     request: Json<CreateCheck>,
 ) -> Result<Json<Check>, ApiError> {
-    let check: Check = repository.check().create(request.0.into()).await?.into();
+    let check: Check = repository
+        .check()
+        .create(&identity, project_id.as_uuid(), request.0.into())
+        .await?
+        .into();
     Ok(check.into())
 }
 
-/// Handler for `PATCH /api/v1/checks/:id`
+/// Handler for `PATCH /api/v1/projects/:id/checks/:id`
 pub async fn update(
-    Path(id): Path<ShortId>,
-    repository: Extension<Repository>,
+    Path((project_id, check_id)): Path<(ShortId, ShortId)>,
+    Extension(identity): Extension<Identity>,
+    Extension(repository): Extension<Repository>,
     request: Json<UpdateCheck>,
 ) -> Result<Json<Check>, ApiError> {
     let check: Check = repository
         .check()
-        .update(id.as_uuid(), request.0.into())
+        .update(
+            &identity,
+            project_id.as_uuid(),
+            check_id.as_uuid(),
+            request.0.into(),
+        )
         .await?
         .into();
     Ok(check.into())
@@ -57,10 +77,14 @@ pub async fn update(
 
 /// Handler for `DELETE /api/v1/checks/:id`
 pub async fn delete(
-    Path(id): Path<ShortId>,
+    Path((project_id, check_id)): Path<(ShortId, ShortId)>,
+    Extension(identity): Extension<Identity>,
     Extension(repository): Extension<Repository>,
 ) -> Result<impl IntoResponse, ApiError> {
-    repository.check().delete(id.as_uuid()).await?;
+    repository
+        .check()
+        .delete(&identity, project_id.as_uuid(), check_id.as_uuid())
+        .await?;
     Ok(Empty::new())
 }
 

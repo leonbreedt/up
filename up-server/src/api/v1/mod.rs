@@ -29,36 +29,40 @@ pub const HEALTH_URI: &str = "/health";
 pub fn router() -> Router {
     Router::new()
         .route("/api/v1/identity", get(identity_handler))
-        .route("/api/v1/checks", get(checks::read_all))
-        .route("/api/v1/checks/:id", get(checks::read_one))
-        .route("/api/v1/checks", post(checks::create))
-        .route("/api/v1/checks/:id", patch(checks::update))
-        .route("/api/v1/checks/:id", delete(checks::delete))
-        .route(
-            "/api/v1/checks/:id/notifications",
-            get(checks::read_all_notifications),
-        )
-        .route(
-            "/api/v1/checks/:id/notifications/:notification_id",
-            get(checks::read_one_notification),
-        )
-        .route(
-            "/api/v1/checks/:id/notifications",
-            post(checks::create_notification),
-        )
-        .route(
-            "/api/v1/checks/:id/notifications/:notification_id",
-            patch(checks::update_notification),
-        )
-        .route(
-            "/api/v1/checks/:id/notifications/:notification_id",
-            delete(checks::delete_notification),
-        )
-        .route("/api/v1/projects", get(projects::read_all))
+        // Projects
         .route("/api/v1/projects/:id", get(projects::read_one))
+        .route("/api/v1/projects", get(projects::read_all))
         .route("/api/v1/projects", post(projects::create))
         .route("/api/v1/projects/:id", patch(projects::update))
         .route("/api/v1/projects/:id", delete(projects::delete))
+        // Checks
+        .route("/api/v1/projects/:id/checks/:id", get(checks::read_one))
+        .route("/api/v1/projects/:id/checks", get(checks::read_all))
+        .route("/api/v1/projects/:id/checks", post(checks::create))
+        .route("/api/v1/projects/:id/checks/:id", patch(checks::update))
+        .route("/api/v1/projects/:id/checks/:id", delete(checks::delete))
+        // Notifications
+        .route(
+            "/api/v1/projects/:id/checks/:id/notifications/:id",
+            get(checks::read_one_notification),
+        )
+        .route(
+            "/api/v1/projects/:id/checks/:id/notifications",
+            get(checks::read_all_notifications),
+        )
+        .route(
+            "/api/v1/projects/:id/checks/:id/notifications",
+            post(checks::create_notification),
+        )
+        .route(
+            "/api/v1/projects/:id/checks/:id/notifications/:id",
+            patch(checks::update_notification),
+        )
+        .route(
+            "/api/v1/projects/:id/checks/:id/notifications/:id",
+            delete(checks::delete_notification),
+        )
+        // Miscellaneous
         .route(HEALTH_URI, get(health_handler))
         .route(&format!("{}/:key", PING_URI), post(ping::ping))
 }

@@ -87,13 +87,13 @@ impl ProjectRepository {
             FROM
                 projects
             WHERE
-                uuid = ANY($1)
+                id = ANY($1)
                 AND
                 deleted = false
         ";
 
         Ok(sqlx::query_as(sql)
-            .bind(&identity.project_uuids)
+            .bind(&identity.project_ids())
             .fetch_all(&mut *conn)
             .await?)
     }

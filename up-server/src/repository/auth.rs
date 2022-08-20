@@ -8,8 +8,8 @@ pub struct User {
     pub id: i64,
     pub uuid: Uuid,
     pub email: String,
-    pub account_uuids: Vec<Uuid>,
-    pub project_uuids: Vec<Uuid>,
+    pub account_ids: Vec<String>,
+    pub project_ids: Vec<String>,
     pub roles: Vec<UserRole>,
 }
 
@@ -46,17 +46,17 @@ impl AuthRepository {
                 uuid,
                 email,
                 ARRAY(
-                    SELECT DISTINCT a.uuid
+                    SELECT DISTINCT a.uuid || '|' || a.id
                     FROM user_accounts ua
                     INNER JOIN accounts a ON a.id = ua.account_id
                     WHERE ua.user_id = users.id
-                ) AS account_uuids,
+                ) AS account_ids,
                 ARRAY(
-                    SELECT DISTINCT p.uuid
+                    SELECT DISTINCT p.uuid || '|' || p.id
                     FROM user_projects up
                     INNER JOIN projects p ON p.id = up.project_id
                     WHERE up.user_id = users.id
-                ) AS project_uuids,
+                ) AS project_ids,
                 ARRAY(
                     SELECT DISTINCT ur.role
                     FROM user_roles ur

@@ -2,6 +2,7 @@ use chrono::NaiveDateTime;
 use uuid::Uuid;
 
 use crate::{
+    auth::Identity,
     database::Database,
     repository::{RepositoryError, Result},
     shortid::ShortId,
@@ -99,10 +100,22 @@ impl CheckRepository {
         Self { database }
     }
 
-    pub async fn read_one(&self, uuid: &Uuid) -> Result<Check> {
+    pub async fn read_one(
+        &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
+        check_uuid: &Uuid,
+    ) -> Result<Check> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut conn = self.database.connection().await?;
 
-        tracing::trace!(uuid = uuid.to_string(), "reading check");
+        tracing::trace!(
+            project_uuid = project_uuid.to_string(),
+            check_uuid = check_uuid.to_string(),
+            "reading check"
+        );
 
         let sql = r"
             SELECT
@@ -110,25 +123,34 @@ impl CheckRepository {
             FROM
                 checks
             WHERE
-                uuid = $1
+                project_id = $1
+                AND
+                uuid = $2
+                AND
+                account_id = ANY($3)
                 AND
                 deleted = false
         ";
 
         sqlx::query_as(sql)
-            .bind(uuid)
+            .bind(project_id)
+            .bind(check_uuid)
+            .bind(&identity.project_ids())
             .fetch_optional(&mut *conn)
             .await?
             .ok_or_else(|| RepositoryError::NotFound {
                 entity_type: ENTITY_CHECK.to_string(),
-                id: ShortId::from_uuid(uuid).to_string(),
+                id: ShortId::from_uuid(check_uuid).to_string(),
             })
     }
 
-    pub async fn read_all(&self) -> Result<Vec<Check>> {
+    pub async fn read_all(&self, identity: &Identity, project_uuid: &Uuid) -> Result<Vec<Check>> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut conn = self.database.connection().await?;
 
-        tracing::trace!("reading checks");
+        tracing::trace!(project_uuid = project_uuid.to_string(), "reading checks");
 
         let sql = r"
             SELECT
@@ -136,10 +158,18 @@ impl CheckRepository {
             FROM
                 checks
             WHERE
+                project_id = $1
+                AND
+                account_id = ANY($2)
+                AND
                 deleted = false
         ";
 
-        Ok(sqlx::query_as(sql).fetch_all(&mut *conn).await?)
+        Ok(sqlx::query_as(sql)
+            .bind(project_id)
+            .bind(&identity.account_ids())
+            .fetch_all(&mut *conn)
+            .await?)
     }
 
     pub async fn enqueue_alerts_for_overdue_pings(&self) -> Result<()> {
@@ -298,7 +328,18 @@ impl CheckRepository {
         Ok(())
     }
 
-    pub async fn create(&self, request: CreateCheck) -> Result<Check> {
+    pub async fn create(
+        &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
+        request: CreateCheck,
+    ) -> Result<Check> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        identity.ensure_assigned_to_account(&request.account_uuid)?;
+
+        let project_id = identity.get_project_id(project_uuid)?;
+        let account_id = identity.get_account_id(&request.account_uuid)?;
+
         let mut tx = self.database.transaction().await?;
 
         tracing::trace!(
@@ -321,8 +362,8 @@ impl CheckRepository {
                 ping_key,
                 name
             ) VALUES (
-                (SELECT id FROM accounts WHERE uuid = $1),
-                (SELECT id FROM projects WHERE uuid = $2),
+                $1,
+                $2,
                 $3,
                 $4,
                 $5,
@@ -331,8 +372,8 @@ impl CheckRepository {
         ";
 
         let check: Check = sqlx::query_as(sql)
-            .bind(&request.account_uuid)
-            .bind(&request.project_uuid)
+            .bind(account_id)
+            .bind(project_id)
             .bind(uuid)
             .bind(short_id.to_string())
             .bind(ping_key.to_string())
@@ -352,35 +393,65 @@ impl CheckRepository {
         Ok(check)
     }
 
-    pub async fn update(&self, uuid: &Uuid, request: UpdateCheck) -> Result<Check> {
+    pub async fn update(
+        &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
+        uuid: &Uuid,
+        request: UpdateCheck,
+    ) -> Result<Check> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut tx = self.database.transaction().await?;
 
         let sql = r"
             UPDATE
                 checks
             SET
-                name = COALESCE($2,name)
+                name = COALESCE($4,name)
             WHERE
                 uuid = $1
+                AND
+                project_id = $2
+                AND
+                account_id = ANY($3)
                 AND
                 deleted = false
             RETURNING *
         ";
 
-        let check: Check = sqlx::query_as(sql)
+        let check: Option<Check> = sqlx::query_as(sql)
             .bind(uuid)
+            .bind(project_id)
+            .bind(&identity.account_ids())
             .bind(&request.name)
-            .fetch_one(&mut tx)
+            .fetch_optional(&mut tx)
             .await?;
+
+        if check.is_none() {
+            return Err(RepositoryError::NotFound {
+                entity_type: ENTITY_CHECK.to_string(),
+                id: ShortId::from_uuid(uuid).to_string(),
+            });
+        }
 
         tx.commit().await?;
 
         tracing::trace!(uuid = uuid.to_string(), "check updated");
 
-        Ok(check)
+        Ok(check.unwrap())
     }
 
-    pub async fn delete(&self, uuid: &Uuid) -> Result<bool> {
+    pub async fn delete(
+        &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
+        uuid: &Uuid,
+    ) -> Result<bool> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut tx = self.database.transaction().await?;
 
         tracing::trace!(uuid = uuid.to_string(), "deleting check");
@@ -393,10 +464,16 @@ impl CheckRepository {
                 deleted_at = NOW() AT TIME ZONE 'UTC'
             WHERE
                 uuid = $1
+                AND
+                project_id = $2
+                AND
+                account_id = ANY($3)
         ";
 
         let deleted = sqlx::query(sql)
             .bind(uuid)
+            .bind(project_id)
+            .bind(&identity.account_ids())
             .execute(&mut tx)
             .await?
             .rows_affected()

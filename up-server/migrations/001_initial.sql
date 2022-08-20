@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS checks (
     CONSTRAINT checks_unique_shortid UNIQUE (shortid)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS checks_unique_name_account_project_id
+    ON checks (name, account_id, project_id)
+    WHERE deleted = false;
+
 CREATE TYPE notification_type AS ENUM ('EMAIL', 'WEBHOOK');
 
 CREATE TABLE IF NOT EXISTS notifications (
