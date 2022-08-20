@@ -9,8 +9,8 @@ use crate::{
     shortid::ShortId,
 };
 
-const ENTITY_ACCOUNT: &str = "account";
-const ENTITY_PROJECT: &str = "project";
+pub const ENTITY_ACCOUNT: &str = "account";
+pub const ENTITY_PROJECT: &str = "project";
 
 #[derive(sqlx::FromRow)]
 pub struct Project {

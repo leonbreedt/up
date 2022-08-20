@@ -216,7 +216,6 @@ impl From<dto::PeriodUnits> for PeriodUnits {
 impl From<CreateCheck> for dto::CreateCheck {
     fn from(request: CreateCheck) -> Self {
         Self {
-            account_uuid: request.account_id.into_uuid(),
             project_uuid: request.project_id.into_uuid(),
             name: request.name,
         }

@@ -1,10 +1,6 @@
 # TODO
 
-- tighten up security:
-  - add updated_by and deleted_by columns
-  - only an admin can create/update projects or assign users to them
-  - only an editor can create/update/delete checks in projects
-  - a viewer cannot change any data
+- populate updated_by and deleted_by columns
 
 - add unit tests
 

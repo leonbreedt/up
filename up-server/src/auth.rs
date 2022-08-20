@@ -38,12 +38,15 @@ pub struct Identity {
     pub roles: HashMap<i64, Vec<Role>>,
 }
 
-const ENTITY_ACCOUNT: &str = "account";
 const ENTITY_PROJECT: &str = "project";
 
 impl Identity {
     pub fn is_administrator_in_account(&self, uuid: &Uuid) -> bool {
         self.has_role_in_account(uuid, Role::Administrator)
+    }
+
+    pub fn is_member_in_account_with_id(&self, id: i64) -> bool {
+        self.has_role_in_account_with_id(id, Role::Member)
     }
 
     pub fn is_administrator_in_account_with_id(&self, id: i64) -> bool {
@@ -60,7 +63,7 @@ impl Identity {
     pub fn has_role_in_account_with_id(&self, id: i64, role: Role) -> bool {
         self.roles
             .get(&id)
-            .map(|r| r.contains(&role))
+            .map(|r| self.has_equivalent_role(r, role))
             .unwrap_or(false)
     }
 
@@ -72,20 +75,10 @@ impl Identity {
         self.project_ids.contains_key(uuid)
     }
 
-    pub fn get_account_id(&self, account_uuid: &Uuid) -> Result<i64, RepositoryError> {
-        self.account_ids
-            .get(account_uuid)
-            .map(|id| *id)
-            .ok_or(RepositoryError::NotFound {
-                entity_type: ENTITY_ACCOUNT.to_string(),
-                id: ShortId::from_uuid(account_uuid).to_string(),
-            })
-    }
-
     pub fn get_project_id(&self, project_uuid: &Uuid) -> Result<i64, RepositoryError> {
         self.project_ids
             .get(project_uuid)
-            .map(|id| *id)
+            .copied()
             .ok_or(RepositoryError::NotFound {
                 entity_type: ENTITY_PROJECT.to_string(),
                 id: ShortId::from_uuid(project_uuid).to_string(),
@@ -93,26 +86,11 @@ impl Identity {
     }
 
     pub fn project_ids(&self) -> Vec<i64> {
-        self.project_ids.values().map(|v| *v).collect()
+        self.project_ids.values().copied().collect()
     }
 
     pub fn account_ids(&self) -> Vec<i64> {
-        self.account_ids.values().map(|v| *v).collect()
-    }
-
-    pub fn ensure_assigned_to_account(&self, uuid: &Uuid) -> Result<(), RepositoryError> {
-        if !self.is_assigned_to_account(uuid) {
-            tracing::trace!(
-                user_uuid = self.user_uuid.to_string(),
-                account_uuid = uuid.to_string(),
-                "user not assigned to account, rejecting API call"
-            );
-            return Err(RepositoryError::NotFound {
-                entity_type: ENTITY_ACCOUNT.to_string(),
-                id: ShortId::from_uuid(uuid).to_string(),
-            });
-        }
-        Ok(())
+        self.account_ids.values().copied().collect()
     }
 
     pub fn ensure_assigned_to_project(&self, uuid: &Uuid) -> Result<(), RepositoryError> {
@@ -128,6 +106,18 @@ impl Identity {
             });
         }
         Ok(())
+    }
+
+    fn has_equivalent_role(&self, roles: &[Role], role: Role) -> bool {
+        match role {
+            Role::Viewer => {
+                roles.contains(&Role::Viewer)
+                    || roles.contains(&Role::Member)
+                    || roles.contains(&Role::Administrator)
+            }
+            Role::Member => roles.contains(&Role::Member) || roles.contains(&Role::Administrator),
+            Role::Administrator => roles.contains(&Role::Administrator),
+        }
     }
 }
 
@@ -157,7 +147,7 @@ impl From<User> for Identity {
 fn to_role_and_id_map(items: Vec<String>) -> HashMap<i64, Vec<Role>> {
     let mut map = HashMap::new();
     for item in items {
-        let parsed: Vec<_> = item.split("|").collect();
+        let parsed: Vec<_> = item.split('|').collect();
         let account_id: i64 = parsed[1].parse().unwrap();
         let user_role: UserRole = parsed[0].parse().unwrap();
         let role: Role = user_role.into();
@@ -174,7 +164,7 @@ fn to_uuid_and_id_map(items: Vec<String>) -> HashMap<Uuid, i64> {
         items
             .iter()
             .map(|v| {
-                let parsed: Vec<_> = v.split("|").collect();
+                let parsed: Vec<_> = v.split('|').collect();
                 (parsed[0].parse().unwrap(), parsed[1].parse().unwrap())
             })
             .collect::<Vec<_>>(),
@@ -235,7 +225,7 @@ pub async fn auth_middleware<B>(
                     "user authorized"
                 );
                 req.extensions_mut().insert(identity);
-                return Ok(next.run(req).await);
+                Ok(next.run(req).await)
             }
             Ok(None) => {
                 tracing::trace!(subject = subject, "user not found in repository");

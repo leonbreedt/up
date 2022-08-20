@@ -218,6 +218,10 @@ impl NotificationRepository {
             .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
             .await?;
 
+        if !identity.is_member_in_account_with_id(account_id) {
+            return Err(RepositoryError::Forbidden);
+        }
+
         let sql = r"
             INSERT INTO notifications (
                 check_id,
@@ -291,6 +295,10 @@ impl NotificationRepository {
             .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
             .await?;
 
+        if !identity.is_member_in_account_with_id(account_id) {
+            return Err(RepositoryError::Forbidden);
+        }
+
         let sql = r"
             UPDATE
                 notifications
@@ -358,6 +366,10 @@ impl NotificationRepository {
         let (check_id, account_id) = self
             .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
             .await?;
+
+        if !identity.is_member_in_account_with_id(account_id) {
+            return Err(RepositoryError::Forbidden);
+        }
 
         tracing::trace!(
             check_uuid = check_uuid.to_string(),

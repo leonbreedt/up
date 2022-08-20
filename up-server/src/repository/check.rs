@@ -3,8 +3,8 @@ use uuid::Uuid;
 
 use crate::{
     auth::Identity,
-    database::Database,
-    repository::{RepositoryError, Result},
+    database::{Database, DbConnection},
+    repository::{project::ENTITY_PROJECT, RepositoryError, Result},
     shortid::ShortId,
 };
 
@@ -81,7 +81,6 @@ impl ToString for NotificationType {
 }
 
 pub struct CreateCheck {
-    pub account_uuid: Uuid,
     pub project_uuid: Uuid,
     pub name: String,
 }
@@ -107,9 +106,14 @@ impl CheckRepository {
         check_uuid: &Uuid,
     ) -> Result<Check> {
         identity.ensure_assigned_to_project(project_uuid)?;
+
         let project_id = identity.get_project_id(project_uuid)?;
 
         let mut conn = self.database.connection().await?;
+
+        let (check_id, account_id) = self
+            .get_check_account_id(&mut conn, check_uuid, project_id, &identity.account_ids())
+            .await?;
 
         tracing::trace!(
             project_uuid = project_uuid.to_string(),
@@ -123,19 +127,19 @@ impl CheckRepository {
             FROM
                 checks
             WHERE
-                project_id = $1
+                id = $1
                 AND
-                uuid = $2
+                account_id = $2
                 AND
-                account_id = ANY($3)
+                project_id = $3
                 AND
                 deleted = false
         ";
 
         sqlx::query_as(sql)
+            .bind(check_id)
+            .bind(account_id)
             .bind(project_id)
-            .bind(check_uuid)
-            .bind(&identity.project_ids())
             .fetch_optional(&mut conn)
             .await?
             .ok_or_else(|| RepositoryError::NotFound {
@@ -179,15 +183,18 @@ impl CheckRepository {
         request: CreateCheck,
     ) -> Result<Check> {
         identity.ensure_assigned_to_project(project_uuid)?;
-        identity.ensure_assigned_to_account(&request.account_uuid)?;
-
-        let project_id = identity.get_project_id(project_uuid)?;
-        let account_id = identity.get_account_id(&request.account_uuid)?;
 
         let mut tx = self.database.transaction().await?;
 
+        let (project_id, account_id) = self
+            .get_project_account_id(&mut tx, project_uuid, &identity.account_ids())
+            .await?;
+
+        if !identity.is_member_in_account_with_id(account_id) {
+            return Err(RepositoryError::Forbidden);
+        }
+
         tracing::trace!(
-            account_uuid = request.account_uuid.to_string(),
             project_uuid = request.project_uuid.to_string(),
             name = request.name,
             "creating check"
@@ -228,7 +235,6 @@ impl CheckRepository {
         tx.commit().await?;
 
         tracing::trace!(
-            account_uuid = &request.account_uuid.to_string(),
             uuid = check.uuid.to_string(),
             name = &request.name,
             "check created"
@@ -245,9 +251,16 @@ impl CheckRepository {
         request: UpdateCheck,
     ) -> Result<Check> {
         identity.ensure_assigned_to_project(project_uuid)?;
-        let project_id = identity.get_project_id(project_uuid)?;
 
         let mut tx = self.database.transaction().await?;
+
+        let (project_id, account_id) = self
+            .get_project_account_id(&mut tx, project_uuid, &identity.account_ids())
+            .await?;
+
+        if !identity.is_member_in_account_with_id(account_id) {
+            return Err(RepositoryError::Forbidden);
+        }
 
         let sql = r"
             UPDATE
@@ -259,7 +272,7 @@ impl CheckRepository {
                 AND
                 project_id = $2
                 AND
-                account_id = ANY($3)
+                account_id = $3
                 AND
                 deleted = false
             RETURNING *
@@ -268,7 +281,7 @@ impl CheckRepository {
         let check: Option<Check> = sqlx::query_as(sql)
             .bind(uuid)
             .bind(project_id)
-            .bind(&identity.account_ids())
+            .bind(account_id)
             .bind(&request.name)
             .fetch_optional(&mut tx)
             .await?;
@@ -294,9 +307,16 @@ impl CheckRepository {
         uuid: &Uuid,
     ) -> Result<bool> {
         identity.ensure_assigned_to_project(project_uuid)?;
-        let project_id = identity.get_project_id(project_uuid)?;
 
         let mut tx = self.database.transaction().await?;
+
+        let (project_id, account_id) = self
+            .get_project_account_id(&mut tx, project_uuid, &identity.account_ids())
+            .await?;
+
+        if !identity.is_member_in_account_with_id(account_id) {
+            return Err(RepositoryError::Forbidden);
+        }
 
         tracing::trace!(uuid = uuid.to_string(), "deleting check");
 
@@ -311,13 +331,13 @@ impl CheckRepository {
                 AND
                 project_id = $2
                 AND
-                account_id = ANY($3)
+                account_id = $3
         ";
 
         let deleted = sqlx::query(sql)
             .bind(uuid)
             .bind(project_id)
-            .bind(&identity.account_ids())
+            .bind(account_id)
             .execute(&mut tx)
             .await?
             .rows_affected()
@@ -514,5 +534,75 @@ impl CheckRepository {
         tx.commit().await?;
 
         Ok(())
+    }
+
+    async fn get_project_account_id(
+        &self,
+        conn: &mut DbConnection,
+        project_uuid: &Uuid,
+        account_ids: &[i64],
+    ) -> Result<(i64, i64)> {
+        let sql = r"
+            SELECT
+                id,
+                account_id
+            FROM
+                projects
+            WHERE
+                uuid = $1
+                AND
+                account_id = ANY($2)
+                AND
+                deleted = false
+            LIMIT 1
+        ";
+
+        let ids: Option<(i64, i64)> = sqlx::query_as(sql)
+            .bind(project_uuid)
+            .bind(account_ids)
+            .fetch_optional(conn)
+            .await?;
+
+        ids.ok_or(RepositoryError::NotFound {
+            entity_type: ENTITY_PROJECT.to_string(),
+            id: ShortId::from(project_uuid).to_string(),
+        })
+    }
+
+    async fn get_check_account_id(
+        &self,
+        conn: &mut DbConnection,
+        check_uuid: &Uuid,
+        project_id: i64,
+        account_ids: &[i64],
+    ) -> Result<(i64, i64)> {
+        let sql = r"
+            SELECT
+                id,
+                account_id
+            FROM
+                checks
+            WHERE
+                uuid = $1
+                AND
+                project_id = $2
+                AND
+                account_id = ANY($3)
+                AND
+                deleted = false
+            LIMIT 1
+        ";
+
+        let ids: Option<(i64, i64)> = sqlx::query_as(sql)
+            .bind(check_uuid)
+            .bind(project_id)
+            .bind(account_ids)
+            .fetch_optional(conn)
+            .await?;
+
+        ids.ok_or(RepositoryError::NotFound {
+            entity_type: ENTITY_CHECK.to_string(),
+            id: ShortId::from(check_uuid).to_string(),
+        })
     }
 }
