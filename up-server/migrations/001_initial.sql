@@ -1,31 +1,20 @@
-CREATE TABLE IF NOT EXISTS accounts (
-    id          BIGSERIAL PRIMARY KEY,
-    uuid        UUID NOT NULL DEFAULT gen_random_uuid(),
-    shortid     TEXT NOT NULL,
-    name        TEXT NOT NULL,
-    created_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-    updated_at  TIMESTAMP WITHOUT TIME ZONE,
-    deleted     BOOLEAN NOT NULL DEFAULT false,
-    deleted_at  TIMESTAMP WITHOUT TIME ZONE,
-    CONSTRAINT  accounts_unique_uuid UNIQUE (uuid),
-    CONSTRAINT  accounts_unique_shortid UNIQUE (shortid)
-);
-
 CREATE TABLE IF NOT EXISTS users (
-    id          BIGSERIAL PRIMARY KEY,
-    uuid        UUID NOT NULL DEFAULT gen_random_uuid(),
-    shortid     TEXT NOT NULL,
-    -- this randomly generated value is what goes into JWT, not identifying information like email,
-    -- so that it can be revoked easily, invalidating any extant JWTs immediately
-    subject     TEXT NOT NULL,
-    email       TEXT NOT NULL,
-    created_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-    updated_at  TIMESTAMP WITHOUT TIME ZONE,
-    deleted     BOOLEAN NOT NULL DEFAULT false,
-    deleted_at  TIMESTAMP WITHOUT TIME ZONE,
-    CONSTRAINT  users_unique_uuid UNIQUE (uuid),
-    CONSTRAINT  users_unique_shortid UNIQUE (shortid),
-    CONSTRAINT  users_unique_subject UNIQUE (subject)
+    id         BIGSERIAL PRIMARY KEY,
+    uuid       UUID NOT NULL DEFAULT gen_random_uuid(),
+    shortid    TEXT NOT NULL,
+    -- the randomly generated subject is what goes into JWT, not identifying information like email.
+    -- so that it can be revoked easily, invalidating any existing JWTs in the wild immediately.
+    subject    TEXT NOT NULL,
+    email      TEXT NOT NULL,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    updated_at TIMESTAMP WITHOUT TIME ZONE,
+    updated_by BIGINT REFERENCES users(id),
+    deleted    BOOLEAN NOT NULL DEFAULT false,
+    deleted_at TIMESTAMP WITHOUT TIME ZONE,
+    deleted_by BIGINT REFERENCES users(id),
+    CONSTRAINT users_unique_uuid UNIQUE (uuid),
+    CONSTRAINT users_unique_shortid UNIQUE (shortid),
+    CONSTRAINT users_unique_subject UNIQUE (subject)
 );
 
 CREATE TYPE user_role AS ENUM ('ADMINISTRATOR', 'MEMBER', 'VIEWER');
@@ -34,6 +23,21 @@ CREATE TABLE IF NOT EXISTS user_roles (
     user_id    BIGINT NOT NULL REFERENCES users (id),
     role       user_role NOT NULL,
     PRIMARY KEY (user_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id         BIGSERIAL PRIMARY KEY,
+    uuid       UUID NOT NULL DEFAULT gen_random_uuid(),
+    shortid    TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    updated_at TIMESTAMP WITHOUT TIME ZONE,
+    updated_by BIGINT REFERENCES users(id),
+    deleted    BOOLEAN NOT NULL DEFAULT false,
+    deleted_at TIMESTAMP WITHOUT TIME ZONE,
+    deleted_by BIGINT REFERENCES users(id),
+    CONSTRAINT accounts_unique_uuid UNIQUE (uuid),
+    CONSTRAINT accounts_unique_shortid UNIQUE (shortid)
 );
 
 CREATE TABLE IF NOT EXISTS user_accounts (
@@ -47,17 +51,19 @@ ON users (email)
 WHERE deleted = false;
 
 CREATE TABLE IF NOT EXISTS projects (
-    id          BIGSERIAL PRIMARY KEY,
-    account_id  BIGINT NOT NULL REFERENCES accounts (id),
-    uuid        UUID NOT NULL DEFAULT gen_random_uuid(),
-    shortid     TEXT NOT NULL,
-    name        TEXT NOT NULL,
-    created_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-    updated_at  TIMESTAMP WITHOUT TIME ZONE,
-    deleted     BOOLEAN NOT NULL DEFAULT false,
-    deleted_at  TIMESTAMP WITHOUT TIME ZONE,
-    CONSTRAINT  projects_unique_uuid UNIQUE (uuid),
-    CONSTRAINT  projects_unique_shortid UNIQUE (shortid)
+    id         BIGSERIAL PRIMARY KEY,
+    account_id BIGINT NOT NULL REFERENCES accounts (id),
+    uuid       UUID NOT NULL DEFAULT gen_random_uuid(),
+    shortid    TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    updated_at TIMESTAMP WITHOUT TIME ZONE,
+    updated_by BIGINT REFERENCES users(id),
+    deleted    BOOLEAN NOT NULL DEFAULT false,
+    deleted_at TIMESTAMP WITHOUT TIME ZONE,
+    deleted_by BIGINT REFERENCES users(id),
+    CONSTRAINT projects_unique_uuid UNIQUE (uuid),
+    CONSTRAINT projects_unique_shortid UNIQUE (shortid)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS projects_unique_name_account_id
@@ -93,8 +99,10 @@ CREATE TABLE IF NOT EXISTS checks (
     last_ping_at         TIMESTAMP WITHOUT TIME ZONE,
     created_at           TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
     updated_at           TIMESTAMP WITHOUT TIME ZONE,
+    updated_by           BIGINT REFERENCES users(id),
     deleted              BOOLEAN NOT NULL DEFAULT false,
     deleted_at           TIMESTAMP WITHOUT TIME ZONE,
+    deleted_by           BIGINT REFERENCES users(id),
 
     CONSTRAINT checks_unique_uuid UNIQUE (uuid),
     CONSTRAINT checks_unique_ping_key UNIQUE (ping_key),
@@ -108,19 +116,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS checks_unique_name_account_project_id
 CREATE TYPE notification_type AS ENUM ('EMAIL', 'WEBHOOK');
 
 CREATE TABLE IF NOT EXISTS notifications (
-    id                          BIGSERIAL PRIMARY KEY,
-    check_id                    BIGINT NOT NULL REFERENCES checks (id),
-    uuid                        UUID NOT NULL DEFAULT gen_random_uuid(),
-    shortid                     TEXT NOT NULL,
-    name                        TEXT NOT NULL DEFAULT '',
-    notification_type           notification_type NOT NULL,
-    email                       TEXT,
-    url                         TEXT,
-    max_retries                 INTEGER NOT NULL DEFAULT 5,
-    created_at                  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-    updated_at                  TIMESTAMP WITHOUT TIME ZONE,
-    deleted                     BOOLEAN NOT NULL DEFAULT false,
-    deleted_at                  TIMESTAMP WITHOUT TIME ZONE,
+    id                BIGSERIAL PRIMARY KEY,
+    account_id        BIGINT NOT NULL REFERENCES accounts (id),
+    project_id        BIGINT NOT NULL REFERENCES projects (id),
+    check_id          BIGINT NOT NULL REFERENCES checks (id),
+    uuid              UUID NOT NULL DEFAULT gen_random_uuid(),
+    shortid           TEXT NOT NULL,
+    name              TEXT NOT NULL DEFAULT '',
+    notification_type notification_type NOT NULL,
+    email             TEXT,
+    url               TEXT,
+    max_retries       INTEGER NOT NULL DEFAULT 5,
+    created_at        TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    updated_at        TIMESTAMP WITHOUT TIME ZONE,
+    deleted           BOOLEAN NOT NULL DEFAULT false,
+    deleted_at        TIMESTAMP WITHOUT TIME ZONE,
 
     CONSTRAINT notifications_unique_uuid UNIQUE (uuid),
     CONSTRAINT notifications_unique_shortid UNIQUE (shortid)

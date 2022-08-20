@@ -7,6 +7,7 @@ use tracing::log::LevelFilter;
 
 pub type DbType = sqlx::Postgres;
 pub type DbConnectOptions = sqlx::postgres::PgConnectOptions;
+pub type DbConnection = sqlx::PgConnection;
 pub type DbPoolConnection = PoolConnection<DbType>;
 pub type DbPoolOptions = sqlx::postgres::PgPoolOptions;
 pub type DbTransaction<'t> = sqlx::Transaction<'t, DbType>;

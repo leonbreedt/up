@@ -1,12 +1,7 @@
 # TODO
 
 - tighten up security:
-  - ensure checks and notification tables also include project and account ID to avoid joins and simplify access checks
-  - ensure all queries filter by account
-  - projects are bound to an account
-  - checks are bound to a project
-  - current user can only see projects for accounts they exist in **and** have been added to.
-  - must specify project ID when working with checks and notifications
+  - add updated_by and deleted_by columns
   - only an admin can create/update projects or assign users to them
   - only an editor can create/update/delete checks in projects
   - a viewer cannot change any data

@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     auth::Identity,
-    database::Database,
+    database::{Database, DbConnection},
     notifier::Notifier,
-    repository::{RepositoryError, Result},
+    repository::{check::ENTITY_CHECK, RepositoryError, Result},
     shortid::ShortId,
 };
 
@@ -92,6 +92,10 @@ impl NotificationRepository {
 
         let mut conn = self.database.connection().await?;
 
+        let (check_id, account_id) = self
+            .get_check_account_id(&mut conn, check_uuid, project_id, &identity.account_ids())
+            .await?;
+
         tracing::trace!(
             project_uuid = project_uuid.to_string(),
             check_uuid = check_uuid.to_string(),
@@ -105,18 +109,22 @@ impl NotificationRepository {
             FROM
                 notifications
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false)
+                uuid = $1
                 AND
-                uuid = $4
+                check_id = $2
+                AND
+                account_id = $3
+                AND
+                project_id = $4
                 AND
                 deleted = false
         ";
 
         let check: Option<Notification> = sqlx::query_as(sql)
-            .bind(check_uuid)
-            .bind(project_id)
-            .bind(&identity.account_ids())
             .bind(uuid)
+            .bind(check_id)
+            .bind(account_id)
+            .bind(project_id)
             .fetch_optional(&mut conn)
             .await?;
 
@@ -149,7 +157,37 @@ impl NotificationRepository {
             FROM
                 notifications
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3))
+                check_id = (
+                    SELECT
+                        id
+                    FROM
+                        checks
+                    WHERE
+                        uuid = $1
+                        AND
+                        project_id = $2
+                        AND
+                        account_id = ANY($3)
+                        AND
+                        deleted = false
+                )
+                AND
+                account_id = (
+                    SELECT
+                        account_id
+                    FROM
+                        checks
+                    WHERE
+                        uuid = $1
+                        AND
+                        project_id = $2
+                        AND
+                        account_id = ANY($3)
+                        AND
+                        deleted = false
+                )
+                AND
+                project_id = $2
                 AND
                 deleted = false
         ";
@@ -176,9 +214,15 @@ impl NotificationRepository {
 
         let mut tx = self.database.transaction().await?;
 
+        let (check_id, account_id) = self
+            .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
+            .await?;
+
         let sql = r"
             INSERT INTO notifications (
                 check_id,
+                account_id,
+                project_id,
                 uuid,
                 shortid,
                 name,
@@ -187,24 +231,27 @@ impl NotificationRepository {
                 url,
                 max_retries
             ) VALUES (
-                (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false),
+                $1,
+                $2,
+                $3,
                 $4,
                 $5,
                 $6,
                 $7,
                 $8,
                 $9,
-                COALESCE($10,5)
-            ) RETURNING *
+                $10
+            )
+            RETURNING *
         ";
 
         let uuid = Uuid::new_v4();
         let short_id: ShortId = uuid.into();
 
         let notification: Notification = sqlx::query_as(sql)
-            .bind(check_uuid)
+            .bind(check_id)
+            .bind(account_id)
             .bind(project_id)
-            .bind(&identity.account_ids())
             .bind(uuid)
             .bind(short_id.to_string())
             .bind(&request.name)
@@ -240,6 +287,10 @@ impl NotificationRepository {
 
         let mut tx = self.database.transaction().await?;
 
+        let (check_id, account_id) = self
+            .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
+            .await?;
+
         let sql = r"
             UPDATE
                 notifications
@@ -250,7 +301,11 @@ impl NotificationRepository {
                 max_retries = COALESCE($8, max_retries),
                 updated_at = NOW() AT TIME ZONE 'UTC'
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false)
+                check_id = $1
+                AND
+                account_id = $2
+                AND
+                project_id = $3
                 AND
                 uuid = $4
                 AND
@@ -259,9 +314,9 @@ impl NotificationRepository {
         ";
 
         let notification: Option<Notification> = sqlx::query_as(sql)
-            .bind(check_uuid)
+            .bind(check_id)
+            .bind(account_id)
             .bind(project_id)
-            .bind(&identity.account_ids())
             .bind(uuid)
             .bind(&request.name)
             .bind(&request.email)
@@ -300,6 +355,10 @@ impl NotificationRepository {
 
         let mut tx = self.database.transaction().await?;
 
+        let (check_id, account_id) = self
+            .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
+            .await?;
+
         tracing::trace!(
             check_uuid = check_uuid.to_string(),
             uuid = uuid.to_string(),
@@ -313,15 +372,19 @@ impl NotificationRepository {
                 deleted = true,
                 deleted_at = NOW() AT TIME ZONE 'UTC'
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false)
+                check_id = $1
+                AND
+                account_id = $2
+                AND
+                project_id = $3
                 AND
                 uuid = $4
         ";
 
         let deleted = sqlx::query(sql)
-            .bind(check_uuid)
+            .bind(check_id)
+            .bind(account_id)
             .bind(project_id)
-            .bind(&identity.account_ids())
             .bind(uuid)
             .execute(&mut tx)
             .await?
@@ -451,5 +514,42 @@ impl NotificationRepository {
         tx.commit().await?;
 
         Ok(sent_alerts)
+    }
+
+    async fn get_check_account_id(
+        &self,
+        conn: &mut DbConnection,
+        check_uuid: &Uuid,
+        project_id: i64,
+        account_ids: &[i64],
+    ) -> Result<(i64, i64)> {
+        let sql = r"
+            SELECT
+                id,
+                account_id
+            FROM
+                checks
+            WHERE
+                uuid = $1
+                AND
+                project_id = $2
+                AND
+                account_id = ANY($3)
+                AND
+                deleted = false
+            LIMIT 1
+        ";
+
+        let ids: Option<(i64, i64)> = sqlx::query_as(sql)
+            .bind(check_uuid)
+            .bind(project_id)
+            .bind(account_ids)
+            .fetch_optional(conn)
+            .await?;
+
+        ids.ok_or(RepositoryError::NotFound {
+            entity_type: ENTITY_CHECK.to_string(),
+            id: ShortId::from(check_uuid).to_string(),
+        })
     }
 }

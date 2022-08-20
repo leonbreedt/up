@@ -8,7 +8,7 @@ use crate::{
     shortid::ShortId,
 };
 
-const ENTITY_CHECK: &str = "check";
+pub const ENTITY_CHECK: &str = "check";
 
 #[derive(sqlx::FromRow)]
 pub struct Check {
