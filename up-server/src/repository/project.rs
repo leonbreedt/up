@@ -203,6 +203,10 @@ impl ProjectRepository {
             .get_project_account_id(&mut tx, uuid, &identity.account_ids())
             .await?;
 
+        if !identity.is_administrator_in_account_with_id(account_id) {
+            return Err(RepositoryError::Forbidden);
+        }
+
         let sql = r"
             UPDATE
                 projects
