@@ -13,6 +13,7 @@ use crate::{api::Json, app::App, auth::Identity, repository::RepositoryError};
 use super::{ReportRenderer, ReportType};
 
 pub mod checks;
+pub mod notifications;
 pub mod ping;
 pub mod projects;
 
@@ -44,23 +45,23 @@ pub fn router() -> Router {
         // Notifications
         .route(
             "/api/v1/projects/:id/checks/:id/notifications/:id",
-            get(checks::read_one_notification),
+            get(notifications::read_one),
         )
         .route(
             "/api/v1/projects/:id/checks/:id/notifications",
-            get(checks::read_all_notifications),
+            get(notifications::read_all),
         )
         .route(
             "/api/v1/projects/:id/checks/:id/notifications",
-            post(checks::create_notification),
+            post(notifications::create),
         )
         .route(
             "/api/v1/projects/:id/checks/:id/notifications/:id",
-            patch(checks::update_notification),
+            patch(notifications::update),
         )
         .route(
             "/api/v1/projects/:id/checks/:id/notifications/:id",
-            delete(checks::delete_notification),
+            delete(notifications::delete),
         )
         // Miscellaneous
         .route(HEALTH_URI, get(health_handler))

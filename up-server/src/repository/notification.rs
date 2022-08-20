@@ -3,6 +3,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
+    auth::Identity,
     database::Database,
     notifier::Notifier,
     repository::{RepositoryError, Result},
@@ -79,10 +80,20 @@ impl NotificationRepository {
         Self { database }
     }
 
-    pub async fn read_one(&self, check_uuid: &Uuid, uuid: &Uuid) -> Result<Notification> {
+    pub async fn read_one(
+        &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
+        check_uuid: &Uuid,
+        uuid: &Uuid,
+    ) -> Result<Notification> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut conn = self.database.connection().await?;
 
         tracing::trace!(
+            project_uuid = project_uuid.to_string(),
             check_uuid = check_uuid.to_string(),
             uuid = uuid.to_string(),
             "reading notification"
@@ -94,17 +105,19 @@ impl NotificationRepository {
             FROM
                 notifications
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1)
+                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false)
                 AND
-                uuid = $2
+                uuid = $4
                 AND
                 deleted = false
         ";
 
         let check: Option<Notification> = sqlx::query_as(sql)
             .bind(check_uuid)
+            .bind(project_id)
+            .bind(&identity.account_ids())
             .bind(uuid)
-            .fetch_optional(&mut *conn)
+            .fetch_optional(&mut conn)
             .await?;
 
         check.ok_or_else(|| RepositoryError::NotFound {
@@ -113,10 +126,22 @@ impl NotificationRepository {
         })
     }
 
-    pub async fn read_all(&self, check_uuid: &Uuid) -> Result<Vec<Notification>> {
+    pub async fn read_all(
+        &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
+        check_uuid: &Uuid,
+    ) -> Result<Vec<Notification>> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut conn = self.database.connection().await?;
 
-        tracing::trace!("reading all notifications");
+        tracing::trace!(
+            project_uuid = project_uuid.to_string(),
+            check_uuid = check_uuid.to_string(),
+            "reading all notifications"
+        );
 
         let sql = r"
             SELECT
@@ -124,14 +149,16 @@ impl NotificationRepository {
             FROM
                 notifications
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1)
+                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3))
                 AND
                 deleted = false
         ";
 
         let notifications: Vec<Notification> = sqlx::query_as(sql)
             .bind(check_uuid)
-            .fetch_all(&mut *conn)
+            .bind(project_id)
+            .bind(&identity.account_ids())
+            .fetch_all(&mut conn)
             .await?;
 
         Ok(notifications)
@@ -139,9 +166,14 @@ impl NotificationRepository {
 
     pub async fn create(
         &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
         check_uuid: &Uuid,
         request: CreateNotification,
     ) -> Result<Notification> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut tx = self.database.transaction().await?;
 
         let sql = r"
@@ -155,14 +187,14 @@ impl NotificationRepository {
                 url,
                 max_retries
             ) VALUES (
-                (SELECT id FROM checks WHERE uuid = $1),
-                $2,
-                $3,
+                (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false),
                 $4,
                 $5,
                 $6,
                 $7,
-                COALESCE($8,5)
+                $8,
+                $9,
+                COALESCE($10,5)
             ) RETURNING *
         ";
 
@@ -171,6 +203,8 @@ impl NotificationRepository {
 
         let notification: Notification = sqlx::query_as(sql)
             .bind(check_uuid)
+            .bind(project_id)
+            .bind(&identity.account_ids())
             .bind(uuid)
             .bind(short_id.to_string())
             .bind(&request.name)
@@ -195,25 +229,30 @@ impl NotificationRepository {
 
     pub async fn update(
         &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
         check_uuid: &Uuid,
         uuid: &Uuid,
         request: UpdateNotification,
     ) -> Result<Notification> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut tx = self.database.transaction().await?;
 
         let sql = r"
             UPDATE
                 notifications
             SET
-                name = COALESCE($3, name),
-                email = COALESCE($4, email),
-                url = COALESCE($5, url),
-                max_retries = COALESCE($6, max_retries),
+                name = COALESCE($5, name),
+                email = COALESCE($6, email),
+                url = COALESCE($7, url),
+                max_retries = COALESCE($8, max_retries),
                 updated_at = NOW() AT TIME ZONE 'UTC'
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1)
+                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false)
                 AND
-                uuid = $2
+                uuid = $4
                 AND
                 deleted = false
             RETURNING *
@@ -221,6 +260,8 @@ impl NotificationRepository {
 
         let notification: Option<Notification> = sqlx::query_as(sql)
             .bind(check_uuid)
+            .bind(project_id)
+            .bind(&identity.account_ids())
             .bind(uuid)
             .bind(&request.name)
             .bind(&request.email)
@@ -247,7 +288,16 @@ impl NotificationRepository {
         Ok(notification.unwrap())
     }
 
-    pub async fn delete(&self, check_uuid: &Uuid, uuid: &Uuid) -> Result<bool> {
+    pub async fn delete(
+        &self,
+        identity: &Identity,
+        project_uuid: &Uuid,
+        check_uuid: &Uuid,
+        uuid: &Uuid,
+    ) -> Result<bool> {
+        identity.ensure_assigned_to_project(project_uuid)?;
+        let project_id = identity.get_project_id(project_uuid)?;
+
         let mut tx = self.database.transaction().await?;
 
         tracing::trace!(
@@ -263,13 +313,15 @@ impl NotificationRepository {
                 deleted = true,
                 deleted_at = NOW() AT TIME ZONE 'UTC'
             WHERE
-                check_id = (SELECT id FROM checks WHERE uuid = $1)
+                check_id = (SELECT id FROM checks WHERE uuid = $1 AND project_id = $2 AND account_id = ANY($3) AND deleted = false)
                 AND
-                uuid = $2
+                uuid = $4
         ";
 
         let deleted = sqlx::query(sql)
             .bind(check_uuid)
+            .bind(project_id)
+            .bind(&identity.account_ids())
             .bind(uuid)
             .execute(&mut tx)
             .await?

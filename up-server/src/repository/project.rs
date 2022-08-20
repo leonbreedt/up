@@ -68,7 +68,7 @@ impl ProjectRepository {
 
         sqlx::query_as(sql)
             .bind(uuid)
-            .fetch_optional(&mut *conn)
+            .fetch_optional(&mut conn)
             .await?
             .ok_or_else(|| RepositoryError::NotFound {
                 entity_type: ENTITY_PROJECT.to_string(),
@@ -94,7 +94,7 @@ impl ProjectRepository {
 
         Ok(sqlx::query_as(sql)
             .bind(&identity.project_ids())
-            .fetch_all(&mut *conn)
+            .fetch_all(&mut conn)
             .await?)
     }
 

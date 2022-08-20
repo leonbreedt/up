@@ -1,6 +1,7 @@
 # TODO
 
 - tighten up security:
+  - ensure checks and notification tables also include project and account ID to avoid joins and simplify access checks
   - ensure all queries filter by account
   - projects are bound to an account
   - checks are bound to a project

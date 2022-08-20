@@ -136,7 +136,7 @@ impl CheckRepository {
             .bind(project_id)
             .bind(check_uuid)
             .bind(&identity.project_ids())
-            .fetch_optional(&mut *conn)
+            .fetch_optional(&mut conn)
             .await?
             .ok_or_else(|| RepositoryError::NotFound {
                 entity_type: ENTITY_CHECK.to_string(),
@@ -168,164 +168,8 @@ impl CheckRepository {
         Ok(sqlx::query_as(sql)
             .bind(project_id)
             .bind(&identity.account_ids())
-            .fetch_all(&mut *conn)
+            .fetch_all(&mut conn)
             .await?)
-    }
-
-    pub async fn enqueue_alerts_for_overdue_pings(&self) -> Result<()> {
-        let mut tx = self.database.transaction().await?;
-
-        tracing::trace!("checking for overdue pings");
-
-        // Overdue pings on checks:
-        //
-        // - Are for checks that have been pinged successfully at least once
-        // - Are not currently paused
-        // - Have not been pinged before ping period elapsed
-        // - Have not been pinged before late ping grace period elapsed
-
-        let overdue_ping_sql = r#"
-            SELECT
-                o.id,
-                o.uuid,
-                o.status,
-                o.name,
-                o.last_ping_at
-            FROM (
-                SELECT
-                  c.*,
-                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval) AS ping_overdue,
-                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval + c.grace_period_interval) AS late_ping_overdue
-                FROM (
-                       SELECT
-                           id,
-                           uuid,
-                           name,
-                           status,
-                           last_ping_at,
-                           (CASE ping_period_units
-                                WHEN 'HOURS' THEN INTERVAL '1' HOUR
-                                WHEN 'DAYS' THEN INTERVAL '1' DAY
-                                END * ping_period) AS ping_period_interval,
-                           (CASE grace_period_units
-                                WHEN 'HOURS' THEN INTERVAL '1' HOUR
-                                WHEN 'DAYS' THEN INTERVAL '1' DAY
-                                END * grace_period) AS grace_period_interval
-                       FROM
-                           checks
-                       WHERE
-                               deleted = false
-                         AND last_ping_at IS NOT NULL
-                         AND status NOT IN ('CREATED', 'PAUSED')
-                   ) AS c
-                ) AS o
-            WHERE
-                o.ping_overdue = true
-                OR
-                o.late_ping_overdue = true;
-        "#;
-
-        let overdue_pings: Vec<(i64, Uuid, CheckStatus, String, NaiveDateTime)> =
-            sqlx::query_as(overdue_ping_sql).fetch_all(&mut tx).await?;
-
-        for ping_details in overdue_pings {
-            let (check_id, check_uuid, check_status, check_name, last_ping_at) = ping_details;
-
-            let sql = r"
-                UPDATE
-                    checks
-                SET
-                    status = 'DOWN'
-                WHERE
-                    uuid = $1
-                    AND
-                    deleted = false
-            ";
-
-            let rows_updated = sqlx::query(sql)
-                .bind(check_uuid)
-                .execute(&mut tx)
-                .await?
-                .rows_affected();
-
-            if rows_updated == 0 {
-                tracing::error!(
-                    check_uuid = check_uuid.to_string(),
-                    "failed to set status of check to DOWN, no rows updated"
-                );
-                return Err(RepositoryError::NotFound {
-                    entity_type: ENTITY_CHECK.to_string(),
-                    id: ShortId::from_uuid(&check_uuid).to_string(),
-                });
-            }
-
-            let sql = r"
-                SELECT
-                    id,
-                    notification_type,
-                    email,
-                    url,
-                    max_retries
-                FROM
-                    notifications
-                WHERE
-                    check_id = $1
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM notification_alerts a
-                        WHERE
-                            a.notification_id = notifications.id
-                    )
-            ";
-
-            #[allow(clippy::type_complexity)]
-            let notifications_to_alert: Vec<(
-                i64,
-                NotificationType,
-                Option<String>,
-                Option<String>,
-                i32,
-            )> = sqlx::query_as(sql)
-                .bind(check_id)
-                .fetch_all(&mut tx)
-                .await?;
-
-            for (notification_id, notification_type, email, url, retries_remaining) in
-                notifications_to_alert
-            {
-                let sql = r"
-                INSERT INTO notification_alerts (
-                    notification_id,
-                    check_status,
-                    retries_remaining
-                ) VALUES (
-                    $1,
-                    $2,
-                    $3
-                );
-                ";
-                sqlx::query(sql)
-                    .bind(notification_id)
-                    .bind(check_status)
-                    .bind(retries_remaining)
-                    .execute(&mut tx)
-                    .await?;
-
-                tracing::debug!(
-                    check_uuid = check_uuid.to_string(),
-                    name = check_name,
-                    alert_type = notification_type.to_string(),
-                    email = email,
-                    url = url,
-                    last_ping_at = last_ping_at.to_string(),
-                    "enqueuing alert"
-                );
-            }
-        }
-
-        tx.commit().await?;
-
-        Ok(())
     }
 
     pub async fn create(
@@ -513,5 +357,162 @@ impl CheckRepository {
         tx.commit().await?;
 
         Ok(check_uuid.map(|id| id.0))
+    }
+
+    /// [`enqueue_alerts_for_overdue_pings`] not called by APIs, so no access checks needed.
+    pub async fn enqueue_alerts_for_overdue_pings(&self) -> Result<()> {
+        let mut tx = self.database.transaction().await?;
+
+        tracing::trace!("checking for overdue pings");
+
+        // Overdue pings on checks:
+        //
+        // - Are for checks that have been pinged successfully at least once
+        // - Are not currently paused
+        // - Have not been pinged before ping period elapsed
+        // - Have not been pinged before late ping grace period elapsed
+
+        let overdue_ping_sql = r#"
+            SELECT
+                o.id,
+                o.uuid,
+                o.status,
+                o.name,
+                o.last_ping_at
+            FROM (
+                SELECT
+                  c.*,
+                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval) AS ping_overdue,
+                  (NOW() AT TIME ZONE 'UTC' > last_ping_at + c.ping_period_interval + c.grace_period_interval) AS late_ping_overdue
+                FROM (
+                       SELECT
+                           id,
+                           uuid,
+                           name,
+                           status,
+                           last_ping_at,
+                           (CASE ping_period_units
+                                WHEN 'HOURS' THEN INTERVAL '1' HOUR
+                                WHEN 'DAYS' THEN INTERVAL '1' DAY
+                                END * ping_period) AS ping_period_interval,
+                           (CASE grace_period_units
+                                WHEN 'HOURS' THEN INTERVAL '1' HOUR
+                                WHEN 'DAYS' THEN INTERVAL '1' DAY
+                                END * grace_period) AS grace_period_interval
+                       FROM
+                           checks
+                       WHERE
+                               deleted = false
+                         AND last_ping_at IS NOT NULL
+                         AND status NOT IN ('CREATED', 'PAUSED')
+                   ) AS c
+                ) AS o
+            WHERE
+                o.ping_overdue = true
+                OR
+                o.late_ping_overdue = true;
+        "#;
+
+        let overdue_pings: Vec<(i64, Uuid, CheckStatus, String, NaiveDateTime)> =
+            sqlx::query_as(overdue_ping_sql).fetch_all(&mut tx).await?;
+
+        for ping_details in overdue_pings {
+            let (check_id, check_uuid, check_status, check_name, last_ping_at) = ping_details;
+
+            let sql = r"
+                UPDATE
+                    checks
+                SET
+                    status = 'DOWN'
+                WHERE
+                    uuid = $1
+                    AND
+                    deleted = false
+            ";
+
+            let rows_updated = sqlx::query(sql)
+                .bind(check_uuid)
+                .execute(&mut tx)
+                .await?
+                .rows_affected();
+
+            if rows_updated == 0 {
+                tracing::error!(
+                    check_uuid = check_uuid.to_string(),
+                    "failed to set status of check to DOWN, no rows updated"
+                );
+                return Err(RepositoryError::NotFound {
+                    entity_type: ENTITY_CHECK.to_string(),
+                    id: ShortId::from_uuid(&check_uuid).to_string(),
+                });
+            }
+
+            let sql = r"
+                SELECT
+                    id,
+                    notification_type,
+                    email,
+                    url,
+                    max_retries
+                FROM
+                    notifications
+                WHERE
+                    check_id = $1
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM notification_alerts a
+                        WHERE
+                            a.notification_id = notifications.id
+                    )
+            ";
+
+            #[allow(clippy::type_complexity)]
+            let notifications_to_alert: Vec<(
+                i64,
+                NotificationType,
+                Option<String>,
+                Option<String>,
+                i32,
+            )> = sqlx::query_as(sql)
+                .bind(check_id)
+                .fetch_all(&mut tx)
+                .await?;
+
+            for (notification_id, notification_type, email, url, retries_remaining) in
+                notifications_to_alert
+            {
+                let sql = r"
+                INSERT INTO notification_alerts (
+                    notification_id,
+                    check_status,
+                    retries_remaining
+                ) VALUES (
+                    $1,
+                    $2,
+                    $3
+                );
+                ";
+                sqlx::query(sql)
+                    .bind(notification_id)
+                    .bind(check_status)
+                    .bind(retries_remaining)
+                    .execute(&mut tx)
+                    .await?;
+
+                tracing::debug!(
+                    check_uuid = check_uuid.to_string(),
+                    name = check_name,
+                    alert_type = notification_type.to_string(),
+                    email = email,
+                    url = url,
+                    last_ping_at = last_ping_at.to_string(),
+                    "enqueuing alert"
+                );
+            }
+        }
+
+        tx.commit().await?;
+
+        Ok(())
     }
 }
