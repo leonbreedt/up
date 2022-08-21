@@ -1,7 +1,5 @@
 # TODO
 
-- populate updated_by and deleted_by columns
-
 - add unit tests
 
 - add JWT issuing to server via simple login endpoint
