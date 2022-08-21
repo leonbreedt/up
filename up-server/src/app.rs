@@ -30,9 +30,11 @@ pub enum AppError {
 
 impl App {
     pub fn new() -> Self {
-        Self {
-            args: argh::from_env(),
-        }
+        Self::with_args(argh::from_env())
+    }
+
+    pub fn with_args(args: Args) -> Self {
+        Self { args }
     }
 
     pub fn json_output() -> bool {
@@ -57,12 +59,14 @@ impl App {
             tracing_subscriber::fmt::fmt()
                 .json()
                 .with_env_filter(EnvFilter::from_default_env())
-                .init();
+                .try_init()
+                .ok();
         } else {
             JSON_OUTPUT.store(false, Ordering::Relaxed);
             tracing_subscriber::fmt::fmt()
                 .with_env_filter(EnvFilter::from_default_env())
-                .init();
+                .try_init()
+                .ok();
         }
 
         let jwks = env_or_error(JWKS_ENV, "JWT verification")?;
@@ -141,22 +145,33 @@ async fn shutdown_signal(
 
 #[derive(FromArgs)]
 /// The UP server.
-struct Args {
+pub struct Args {
     /// server address:port to listen on (default: 127.0.0.1:8080, PORT environment variable can override default port 8080)
     #[argh(
         option,
         default = "SocketAddr::from(([127, 0, 0, 1], default_listen_port()))"
     )]
-    listen_address: SocketAddr,
+    pub listen_address: SocketAddr,
     /// the database URL to connect to (default: postgres://127.0.0.1:5432/up, or DATABASE_URL environment variable)
     #[argh(option, default = "default_database_url()")]
-    database_url: String,
+    pub database_url: String,
     /// the maximum number of connections in the PostgreSQL connection pool (default: 20, or DATABASE_MAX_CONNECTIONS environment variable)
     #[argh(option, default = "default_database_max_connections()")]
-    database_max_connections: u32,
+    pub database_max_connections: u32,
     /// use JSON for log messages
     #[argh(switch)]
-    json: bool,
+    pub json: bool,
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            listen_address: SocketAddr::from(([127, 0, 0, 1], default_listen_port())),
+            database_url: default_database_url(),
+            database_max_connections: default_database_max_connections(),
+            json: false,
+        }
+    }
 }
 
 const DEFAULT_LISTEN_PORT: u16 = 8080;
