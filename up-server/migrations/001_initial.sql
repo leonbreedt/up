@@ -1,17 +1,22 @@
+CREATE TYPE user_type AS ENUM('SYSTEM', 'STANDARD');
+
 CREATE TABLE IF NOT EXISTS users (
     id         BIGSERIAL PRIMARY KEY,
     uuid       UUID NOT NULL DEFAULT gen_random_uuid(),
     shortid    TEXT NOT NULL,
+    user_type  user_type NOT NULL DEFAULT 'STANDARD',
     -- the randomly generated subject is what goes into JWT, not identifying information like email.
     -- so that it can be revoked easily, invalidating any existing JWTs in the wild immediately.
     subject    TEXT NOT NULL,
     email      TEXT NOT NULL,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    created_by BIGINT REFERENCES users(id),
     updated_at TIMESTAMP WITHOUT TIME ZONE,
     updated_by BIGINT REFERENCES users(id),
     deleted    BOOLEAN NOT NULL DEFAULT false,
     deleted_at TIMESTAMP WITHOUT TIME ZONE,
     deleted_by BIGINT REFERENCES users(id),
+
     CONSTRAINT users_unique_uuid UNIQUE (uuid),
     CONSTRAINT users_unique_shortid UNIQUE (shortid),
     CONSTRAINT users_unique_subject UNIQUE (subject)
@@ -23,11 +28,13 @@ CREATE TABLE IF NOT EXISTS accounts (
     shortid    TEXT NOT NULL,
     name       TEXT NOT NULL,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    created_by BIGINT NOT NULL REFERENCES users(id),
     updated_at TIMESTAMP WITHOUT TIME ZONE,
     updated_by BIGINT REFERENCES users(id),
     deleted    BOOLEAN NOT NULL DEFAULT false,
     deleted_at TIMESTAMP WITHOUT TIME ZONE,
     deleted_by BIGINT REFERENCES users(id),
+
     CONSTRAINT accounts_unique_uuid UNIQUE (uuid),
     CONSTRAINT accounts_unique_shortid UNIQUE (shortid)
 );
@@ -39,6 +46,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_unique_email
 CREATE TABLE IF NOT EXISTS user_accounts (
     user_id    BIGINT NOT NULL REFERENCES users (id),
     account_id BIGINT NOT NULL REFERENCES accounts (id),
+
     PRIMARY KEY (user_id, account_id)
 );
 
@@ -48,6 +56,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
     user_id    BIGINT NOT NULL REFERENCES users (id),
     account_id BIGINT NOT NULL REFERENCES accounts (id),
     role       user_role NOT NULL,
+
     PRIMARY KEY (user_id, role)
 );
 
@@ -58,11 +67,13 @@ CREATE TABLE IF NOT EXISTS projects (
     shortid    TEXT NOT NULL,
     name       TEXT NOT NULL,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    created_by BIGINT NOT NULL REFERENCES users(id),
     updated_at TIMESTAMP WITHOUT TIME ZONE,
     updated_by BIGINT REFERENCES users(id),
     deleted    BOOLEAN NOT NULL DEFAULT false,
     deleted_at TIMESTAMP WITHOUT TIME ZONE,
     deleted_by BIGINT REFERENCES users(id),
+
     CONSTRAINT projects_unique_uuid UNIQUE (uuid),
     CONSTRAINT projects_unique_shortid UNIQUE (shortid)
 );
@@ -74,6 +85,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS projects_unique_name_account_id
 CREATE TABLE IF NOT EXISTS user_projects (
     user_id    BIGINT NOT NULL REFERENCES users (id),
     project_id BIGINT NOT NULL REFERENCES projects (id),
+
     PRIMARY KEY (user_id, project_id)
 );
 
@@ -99,6 +111,7 @@ CREATE TABLE IF NOT EXISTS checks (
     status               check_status NOT NULL DEFAULT 'CREATED',
     last_ping_at         TIMESTAMP WITHOUT TIME ZONE,
     created_at           TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    created_by           BIGINT NOT NULL REFERENCES users(id),
     updated_at           TIMESTAMP WITHOUT TIME ZONE,
     updated_by           BIGINT REFERENCES users(id),
     deleted              BOOLEAN NOT NULL DEFAULT false,
@@ -129,9 +142,12 @@ CREATE TABLE IF NOT EXISTS notifications (
     url               TEXT,
     max_retries       INTEGER NOT NULL DEFAULT 5,
     created_at        TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    created_by        BIGINT NOT NULL REFERENCES users(id),
     updated_at        TIMESTAMP WITHOUT TIME ZONE,
+    updated_by        BIGINT REFERENCES users(id),
     deleted           BOOLEAN NOT NULL DEFAULT false,
     deleted_at        TIMESTAMP WITHOUT TIME ZONE,
+    deleted_by        BIGINT REFERENCES users(id),
 
     CONSTRAINT notifications_unique_uuid UNIQUE (uuid),
     CONSTRAINT notifications_unique_shortid UNIQUE (shortid)
@@ -155,11 +171,13 @@ CREATE TABLE IF NOT EXISTS tags (
     name        TEXT NOT NULL,
     created_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
     updated_at  TIMESTAMP WITHOUT TIME ZONE,
+
     CONSTRAINT  tags_unique_uuid UNIQUE (name)
 );
 
 CREATE TABLE IF NOT EXISTS check_tags (
     check_id BIGINT NOT NULL REFERENCES checks (id),
     tag_id   BIGINT NOT NULL REFERENCES tags (id),
+
     PRIMARY KEY (tag_id, check_id)
 );

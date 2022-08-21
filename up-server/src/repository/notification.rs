@@ -2,11 +2,12 @@ use chrono::NaiveDateTime;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::repository::get_check_account_id;
 use crate::{
     auth::Identity,
-    database::{Database, DbConnection},
+    database::Database,
     notifier::Notifier,
-    repository::{check::ENTITY_CHECK, RepositoryError, Result},
+    repository::{RepositoryError, Result},
     shortid::ShortId,
 };
 
@@ -92,9 +93,9 @@ impl NotificationRepository {
 
         let mut conn = self.database.connection().await?;
 
-        let (check_id, account_id) = self
-            .get_check_account_id(&mut conn, check_uuid, project_id, &identity.account_ids())
-            .await?;
+        let (check_id, account_id) =
+            get_check_account_id(&mut conn, check_uuid, project_id, &identity.account_ids())
+                .await?;
 
         tracing::trace!(
             project_uuid = project_uuid.to_string(),
@@ -214,9 +215,8 @@ impl NotificationRepository {
 
         let mut tx = self.database.transaction().await?;
 
-        let (check_id, account_id) = self
-            .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
-            .await?;
+        let (check_id, account_id) =
+            get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids()).await?;
 
         if !identity.is_member_in_account_with_id(account_id) {
             return Err(RepositoryError::Forbidden);
@@ -233,7 +233,8 @@ impl NotificationRepository {
                 notification_type,
                 email,
                 url,
-                max_retries
+                max_retries,
+                created_by
             ) VALUES (
                 $1,
                 $2,
@@ -244,7 +245,8 @@ impl NotificationRepository {
                 $7,
                 $8,
                 $9,
-                $10
+                $10,
+                $11
             )
             RETURNING *
         ";
@@ -263,6 +265,7 @@ impl NotificationRepository {
             .bind(&request.email)
             .bind(&request.url)
             .bind(&request.max_retries)
+            .bind(identity.user_id)
             .fetch_one(&mut tx)
             .await?;
 
@@ -291,9 +294,8 @@ impl NotificationRepository {
 
         let mut tx = self.database.transaction().await?;
 
-        let (check_id, account_id) = self
-            .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
-            .await?;
+        let (check_id, account_id) =
+            get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids()).await?;
 
         if !identity.is_member_in_account_with_id(account_id) {
             return Err(RepositoryError::Forbidden);
@@ -307,7 +309,8 @@ impl NotificationRepository {
                 email = COALESCE($6, email),
                 url = COALESCE($7, url),
                 max_retries = COALESCE($8, max_retries),
-                updated_at = NOW() AT TIME ZONE 'UTC'
+                updated_at = NOW() AT TIME ZONE 'UTC',
+                updated_by = $9
             WHERE
                 check_id = $1
                 AND
@@ -330,6 +333,7 @@ impl NotificationRepository {
             .bind(&request.email)
             .bind(&request.url)
             .bind(&request.max_retries)
+            .bind(identity.user_id)
             .fetch_optional(&mut tx)
             .await?;
 
@@ -363,9 +367,8 @@ impl NotificationRepository {
 
         let mut tx = self.database.transaction().await?;
 
-        let (check_id, account_id) = self
-            .get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids())
-            .await?;
+        let (check_id, account_id) =
+            get_check_account_id(&mut tx, check_uuid, project_id, &identity.account_ids()).await?;
 
         if !identity.is_member_in_account_with_id(account_id) {
             return Err(RepositoryError::Forbidden);
@@ -382,7 +385,8 @@ impl NotificationRepository {
                 notifications
             SET
                 deleted = true,
-                deleted_at = NOW() AT TIME ZONE 'UTC'
+                deleted_at = NOW() AT TIME ZONE 'UTC',
+                deleted_by = $5
             WHERE
                 check_id = $1
                 AND
@@ -398,6 +402,7 @@ impl NotificationRepository {
             .bind(account_id)
             .bind(project_id)
             .bind(uuid)
+            .bind(identity.user_id)
             .execute(&mut tx)
             .await?
             .rows_affected()
@@ -526,42 +531,5 @@ impl NotificationRepository {
         tx.commit().await?;
 
         Ok(sent_alerts)
-    }
-
-    async fn get_check_account_id(
-        &self,
-        conn: &mut DbConnection,
-        check_uuid: &Uuid,
-        project_id: i64,
-        account_ids: &[i64],
-    ) -> Result<(i64, i64)> {
-        let sql = r"
-            SELECT
-                id,
-                account_id
-            FROM
-                checks
-            WHERE
-                uuid = $1
-                AND
-                project_id = $2
-                AND
-                account_id = ANY($3)
-                AND
-                deleted = false
-            LIMIT 1
-        ";
-
-        let ids: Option<(i64, i64)> = sqlx::query_as(sql)
-            .bind(check_uuid)
-            .bind(project_id)
-            .bind(account_ids)
-            .fetch_optional(conn)
-            .await?;
-
-        ids.ok_or(RepositoryError::NotFound {
-            entity_type: ENTITY_CHECK.to_string(),
-            id: ShortId::from(check_uuid).to_string(),
-        })
     }
 }

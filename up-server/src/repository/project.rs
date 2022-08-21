@@ -1,11 +1,10 @@
 use chrono::NaiveDateTime;
 use uuid::Uuid;
 
-use crate::auth::Identity;
-use crate::database::DbConnection;
 use crate::{
+    auth::Identity,
     database::Database,
-    repository::{RepositoryError, Result},
+    repository::{get_account_id, get_project_account_id, RepositoryError, Result},
     shortid::ShortId,
 };
 
@@ -54,9 +53,8 @@ impl ProjectRepository {
 
         let mut conn = self.database.connection().await?;
 
-        let (project_id, account_id) = self
-            .get_project_account_id(&mut conn, uuid, &identity.account_ids())
-            .await?;
+        let (project_id, account_id) =
+            get_project_account_id(&mut conn, uuid, &identity.account_ids()).await?;
 
         tracing::trace!(uuid = uuid.to_string(), "reading project");
 
@@ -123,9 +121,8 @@ impl ProjectRepository {
 
         let mut tx = self.database.transaction().await?;
 
-        let account_id = self
-            .get_account_id(&mut tx, &request.account_uuid, &identity.account_ids())
-            .await?;
+        let account_id =
+            get_account_id(&mut tx, &request.account_uuid, &identity.account_ids()).await?;
 
         let uuid = Uuid::new_v4();
         let short_id: ShortId = uuid.into();
@@ -135,12 +132,14 @@ impl ProjectRepository {
                 account_id,
                 uuid,
                 shortid,
-                name
+                name,
+                created_by
             ) VALUES (
                 $1,
                 $2,
                 $3,
-                $4
+                $4,
+                $5
             ) RETURNING *
         ";
 
@@ -149,6 +148,7 @@ impl ProjectRepository {
             .bind(uuid)
             .bind(short_id.to_string())
             .bind(&request.name)
+            .bind(identity.user_id)
             .fetch_one(&mut tx)
             .await?;
 
@@ -199,9 +199,8 @@ impl ProjectRepository {
 
         let mut tx = self.database.transaction().await?;
 
-        let (project_id, account_id) = self
-            .get_project_account_id(&mut tx, uuid, &identity.account_ids())
-            .await?;
+        let (project_id, account_id) =
+            get_project_account_id(&mut tx, uuid, &identity.account_ids()).await?;
 
         if !identity.is_administrator_in_account_with_id(account_id) {
             return Err(RepositoryError::Forbidden);
@@ -211,7 +210,9 @@ impl ProjectRepository {
             UPDATE
                 projects
             SET
-                name = COALESCE($3,name)
+                name = COALESCE($3,name),
+                updated_at = NOW() AT TIME ZONE 'UTC',
+                updated_by = $4
             WHERE
                 id = $1
                 AND
@@ -225,6 +226,7 @@ impl ProjectRepository {
             .bind(project_id)
             .bind(account_id)
             .bind(request.name.as_ref())
+            .bind(identity.user_id)
             .fetch_one(&mut tx)
             .await?;
 
@@ -249,9 +251,8 @@ impl ProjectRepository {
 
         let mut tx = self.database.transaction().await?;
 
-        let (project_id, account_id) = self
-            .get_project_account_id(&mut tx, uuid, &identity.account_ids())
-            .await?;
+        let (project_id, account_id) =
+            get_project_account_id(&mut tx, uuid, &identity.account_ids()).await?;
 
         if !identity.is_administrator_in_account_with_id(account_id) {
             return Err(RepositoryError::Forbidden);
@@ -261,13 +262,15 @@ impl ProjectRepository {
             UPDATE projects
             SET
                 deleted = true,
-                deleted_at = NOW() AT TIME ZONE 'UTC'
+                deleted_at = NOW() AT TIME ZONE 'UTC',
+                deleted_by = $2
             WHERE
                 id = $1
         ";
 
         let deleted = sqlx::query(sql)
             .bind(project_id)
+            .bind(identity.user_id)
             .execute(&mut tx)
             .await?
             .rows_affected()
@@ -282,70 +285,5 @@ impl ProjectRepository {
         }
 
         Ok(deleted)
-    }
-
-    async fn get_project_account_id(
-        &self,
-        conn: &mut DbConnection,
-        project_uuid: &Uuid,
-        account_ids: &[i64],
-    ) -> Result<(i64, i64)> {
-        let sql = r"
-            SELECT
-                id,
-                account_id
-            FROM
-                projects
-            WHERE
-                uuid = $1
-                AND
-                account_id = ANY($2)
-                AND
-                deleted = false
-            LIMIT 1
-        ";
-
-        let ids: Option<(i64, i64)> = sqlx::query_as(sql)
-            .bind(project_uuid)
-            .bind(account_ids)
-            .fetch_optional(conn)
-            .await?;
-
-        ids.ok_or(RepositoryError::NotFound {
-            entity_type: ENTITY_PROJECT.to_string(),
-            id: ShortId::from(project_uuid).to_string(),
-        })
-    }
-
-    async fn get_account_id(
-        &self,
-        conn: &mut DbConnection,
-        account_uuid: &Uuid,
-        account_ids: &[i64],
-    ) -> Result<i64> {
-        let sql = r"
-            SELECT
-                id
-            FROM
-                accounts
-            WHERE
-                uuid = $1
-                AND
-                id = ANY($2)
-                AND
-                deleted = false
-            LIMIT 1
-        ";
-
-        let ids: Option<(i64,)> = sqlx::query_as(sql)
-            .bind(account_uuid)
-            .bind(account_ids)
-            .fetch_optional(conn)
-            .await?;
-
-        ids.map(|id| id.0).ok_or(RepositoryError::NotFound {
-            entity_type: ENTITY_ACCOUNT.to_string(),
-            id: ShortId::from(account_uuid).to_string(),
-        })
     }
 }

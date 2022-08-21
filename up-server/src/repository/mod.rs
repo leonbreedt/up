@@ -1,8 +1,8 @@
-use std::borrow::Cow;
-use std::fmt::Debug;
+use std::{borrow::Cow, fmt::Debug};
 
 use miette::Diagnostic;
 use thiserror::Error;
+use uuid::Uuid;
 
 mod auth;
 mod check;
@@ -25,7 +25,14 @@ use check::CheckRepository;
 use notification::NotificationRepository;
 use project::ProjectRepository;
 
-use crate::database::Database;
+use crate::{
+    database::{Database, DbConnection},
+    repository::{
+        check::ENTITY_CHECK,
+        project::{ENTITY_ACCOUNT, ENTITY_PROJECT},
+    },
+    shortid::ShortId,
+};
 
 type Result<T> = miette::Result<T, RepositoryError>;
 
@@ -99,4 +106,103 @@ impl Repository {
     pub fn notification(&self) -> &NotificationRepository {
         &self.notification
     }
+}
+
+async fn get_project_account_id(
+    conn: &mut DbConnection,
+    project_uuid: &Uuid,
+    account_ids: &[i64],
+) -> Result<(i64, i64)> {
+    let sql = r"
+            SELECT
+                id,
+                account_id
+            FROM
+                projects
+            WHERE
+                uuid = $1
+                AND
+                account_id = ANY($2)
+                AND
+                deleted = false
+            LIMIT 1
+        ";
+
+    let ids: Option<(i64, i64)> = sqlx::query_as(sql)
+        .bind(project_uuid)
+        .bind(account_ids)
+        .fetch_optional(conn)
+        .await?;
+
+    ids.ok_or(RepositoryError::NotFound {
+        entity_type: ENTITY_PROJECT.to_string(),
+        id: ShortId::from(project_uuid).to_string(),
+    })
+}
+
+async fn get_check_account_id(
+    conn: &mut DbConnection,
+    check_uuid: &Uuid,
+    project_id: i64,
+    account_ids: &[i64],
+) -> Result<(i64, i64)> {
+    let sql = r"
+            SELECT
+                id,
+                account_id
+            FROM
+                checks
+            WHERE
+                uuid = $1
+                AND
+                project_id = $2
+                AND
+                account_id = ANY($3)
+                AND
+                deleted = false
+            LIMIT 1
+        ";
+
+    let ids: Option<(i64, i64)> = sqlx::query_as(sql)
+        .bind(check_uuid)
+        .bind(project_id)
+        .bind(account_ids)
+        .fetch_optional(conn)
+        .await?;
+
+    ids.ok_or(RepositoryError::NotFound {
+        entity_type: ENTITY_CHECK.to_string(),
+        id: ShortId::from(check_uuid).to_string(),
+    })
+}
+
+async fn get_account_id(
+    conn: &mut DbConnection,
+    account_uuid: &Uuid,
+    account_ids: &[i64],
+) -> Result<i64> {
+    let sql = r"
+            SELECT
+                id
+            FROM
+                accounts
+            WHERE
+                uuid = $1
+                AND
+                id = ANY($2)
+                AND
+                deleted = false
+            LIMIT 1
+        ";
+
+    let ids: Option<(i64,)> = sqlx::query_as(sql)
+        .bind(account_uuid)
+        .bind(account_ids)
+        .fetch_optional(conn)
+        .await?;
+
+    ids.map(|id| id.0).ok_or(RepositoryError::NotFound {
+        entity_type: ENTITY_ACCOUNT.to_string(),
+        id: ShortId::from(account_uuid).to_string(),
+    })
 }
