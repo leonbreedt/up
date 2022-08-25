@@ -93,7 +93,6 @@ pub struct Project {
 /// Body for `POST /api/v1/projects`
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateProject {
-    // TODO: remove, this should be part of logged in context
     pub account_id: ShortId,
     pub name: String,
 }

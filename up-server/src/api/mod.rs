@@ -19,9 +19,7 @@ use up_core::jwt::Verifier;
 
 mod json;
 mod ui;
-mod v1;
-
-pub use v1::{HEALTH_URI, PING_URI};
+pub mod v1;
 
 use crate::{api::json::Json, auth, notifier::Notifier, repository::Repository};
 

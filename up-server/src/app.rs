@@ -95,9 +95,19 @@ impl App {
         let repository = Repository::new(database.clone());
         let postmark_client = integrations::postmark::PostmarkClient::new()?;
         let notifier = Notifier::new(repository.clone(), postmark_client);
-        let mut enqueue_alerts_job = jobs::EnqueueAlerts::with_repository(repository.clone());
-        let mut send_alerts_job =
-            jobs::SendAlerts::with_repository(repository.clone(), notifier.clone());
+
+        let mut enqueue_alerts_job: Option<jobs::EnqueueAlerts> = None;
+        let mut send_alerts_job: Option<jobs::SendAlerts> = None;
+
+        if !self.args.disable_background_jobs {
+            enqueue_alerts_job = Some(jobs::EnqueueAlerts::with_repository(repository.clone()));
+            send_alerts_job = Some(jobs::SendAlerts::with_repository(
+                repository.clone(),
+                notifier.clone(),
+            ));
+        } else {
+            tracing::debug!("background jobs disabled, alerts will not be sent");
+        }
 
         let router = api::build(repository, notifier, jwt_verifier);
 
@@ -112,15 +122,17 @@ impl App {
             "server started"
         );
 
-        enqueue_alerts_job.spawn().await;
-        send_alerts_job.spawn().await;
+        if !self.args.disable_background_jobs {
+            enqueue_alerts_job.as_mut().unwrap().spawn().await;
+            send_alerts_job.as_mut().unwrap().spawn().await;
+        }
 
         let server = axum::Server::bind(&self.args.listen_address)
             .serve(router.into_make_service_with_connect_info::<SocketAddr>());
 
         let graceful = server.with_graceful_shutdown(shutdown_signal(
-            &mut enqueue_alerts_job,
-            &mut send_alerts_job,
+            enqueue_alerts_job.as_mut(),
+            send_alerts_job.as_mut(),
         ));
         graceful.await.into_diagnostic()?;
 
@@ -131,16 +143,20 @@ impl App {
 }
 
 async fn shutdown_signal(
-    enqueue_alerts_job: &mut jobs::EnqueueAlerts,
-    send_alerts_job: &mut jobs::SendAlerts,
+    enqueue_alerts_job: Option<&mut jobs::EnqueueAlerts>,
+    send_alerts_job: Option<&mut jobs::SendAlerts>,
 ) {
     tokio::signal::ctrl_c()
         .await
         .expect("failed to handle Ctrl-C signal");
     tracing::info!("ctrl-c received");
 
-    enqueue_alerts_job.stop().await;
-    send_alerts_job.stop().await;
+    if let Some(enqueue_alerts_job) = enqueue_alerts_job {
+        enqueue_alerts_job.stop().await;
+    }
+    if let Some(send_alerts_job) = send_alerts_job {
+        send_alerts_job.stop().await;
+    }
 }
 
 #[derive(FromArgs)]
@@ -161,6 +177,9 @@ pub struct Args {
     /// use JSON for log messages
     #[argh(switch)]
     pub json: bool,
+    /// disable background jobs
+    #[argh(switch)]
+    pub disable_background_jobs: bool,
 }
 
 impl Default for Args {
@@ -170,6 +189,7 @@ impl Default for Args {
             database_url: default_database_url(),
             database_max_connections: default_database_max_connections(),
             json: false,
+            disable_background_jobs: false,
         }
     }
 }
