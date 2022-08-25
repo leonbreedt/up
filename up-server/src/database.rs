@@ -31,7 +31,7 @@ pub enum DatabaseError {
 }
 
 impl Database {
-    async fn new(url: &str, min_connections: u32, max_connections: u32) -> Result<Self> {
+    pub async fn new(url: &str, min_connections: u32, max_connections: u32) -> Result<Self> {
         let mut connection_options: DbConnectOptions = url
             .parse()
             .map_err(|e| DatabaseError::MalformedUrl(url.to_string(), e))?;
@@ -87,6 +87,10 @@ impl Database {
 
     pub async fn transaction(&self) -> Result<DbTransaction, sqlx::Error> {
         self.pool.begin().await
+    }
+
+    pub async fn close(&self) {
+        self.pool.close().await
     }
 }
 

@@ -11,7 +11,7 @@ use up_core::{auth::Role, jwt};
 use uuid::Uuid;
 
 use crate::{
-    api::{HEALTH_URI, PING_URI},
+    api::v1::{HEALTH_URI, PING_URI},
     mask,
     repository::{
         self,
@@ -219,8 +219,12 @@ pub async fn auth_middleware<B>(
                     email = mask::email(&identity.email),
                     account_uuids =
                         format!("{:?}", identity.account_ids.keys().collect::<Vec<_>>()),
+                    account_ids =
+                        format!("{:?}", identity.account_ids.values().collect::<Vec<_>>()),
                     project_uuids =
                         format!("{:?}", identity.project_ids.keys().collect::<Vec<_>>()),
+                    project_ids =
+                        format!("{:?}", identity.project_ids.values().collect::<Vec<_>>()),
                     roles = format!("{:?}", identity.roles),
                     "user authorized"
                 );
