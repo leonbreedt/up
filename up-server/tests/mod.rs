@@ -214,6 +214,11 @@ impl TestClient {
             .await
     }
 
+    pub async fn delete<RS: DeserializeOwned>(&self, path: &str) -> TestResult<RS> {
+        self.execute_json_request_response(reqwest::Method::DELETE, path, None::<()>)
+            .await
+    }
+
     async fn execute_json_request_response<RQ: Serialize, RS: DeserializeOwned>(
         &self,
         method: reqwest::Method,

@@ -1,8 +1,9 @@
-use axum::{body::Empty, extract::Path, response::IntoResponse, Extension};
+use axum::{extract::Path, Extension};
 use chrono::{DateTime, TimeZone, Utc};
 use miette::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::api::GenericResponse;
 use crate::auth::Identity;
 use crate::{
     api::{v1::ApiError, Json},
@@ -73,9 +74,9 @@ pub async fn delete(
     Path(id): Path<ShortId>,
     Extension(repository): Extension<Repository>,
     Extension(identity): Extension<Identity>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Json<GenericResponse>, ApiError> {
     repository.project().delete(&identity, id.as_uuid()).await?;
-    Ok(Empty::new())
+    Ok(Json(GenericResponse::success("deleted")))
 }
 
 // API model types

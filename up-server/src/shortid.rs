@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use miette::Diagnostic;
@@ -35,6 +36,12 @@ impl Default for ShortId {
     }
 }
 
+impl Display for ShortId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.to_string())
+    }
+}
+
 impl From<Uuid> for ShortId {
     fn from(id: Uuid) -> Self {
         Self::from_uuid(&id)
@@ -65,12 +72,6 @@ impl FromStr for ShortId {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let ulid: Ulid = s.parse().map_err(|_| ParseShortIdError::DecodeFailure)?;
         Ok(Self(ulid, ulid.into()))
-    }
-}
-
-impl ToString for ShortId {
-    fn to_string(&self) -> String {
-        self.0.to_string()
     }
 }
 

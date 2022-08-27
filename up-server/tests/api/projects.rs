@@ -1,5 +1,10 @@
-use crate::{TestApp, TestError, TestUser};
-use up_server::api::v1::projects::{CreateProject, Project};
+use axum::http::StatusCode;
+use up_server::api::{
+    v1::projects::{CreateProject, Project},
+    {GenericResponse, ResponseStatus},
+};
+
+use crate::{TestApp, TestError, TestResult, TestUser};
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 pub async fn viewer_can_list_projects_they_are_assigned_to() {
@@ -64,6 +69,53 @@ pub async fn administrator_can_create_projects() {
     let project: Project = client.post("/api/v1/projects", request).await.unwrap();
 
     assert_eq!("test project", project.name);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+pub async fn administrator_can_delete_projects() {
+    let (_app, client) = TestApp::start_and_connect(TestUser::Administrator).await;
+
+    let request = CreateProject {
+        account_id: "09WDY5H2KX9V6RSV6VC8T01AJC".parse().unwrap(),
+        name: "test project".to_string(),
+    };
+
+    let project: Project = client.post("/api/v1/projects", request).await.unwrap();
+    let response: GenericResponse = client
+        .delete(&format!("/api/v1/projects/{}", project.id))
+        .await
+        .unwrap();
+
+    assert!(matches!(response.status, ResponseStatus::Success));
+    assert_eq!("deleted", response.message.unwrap());
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+pub async fn member_cant_delete_projects() {
+    let (_app, client) = TestApp::start_and_connect(TestUser::Member).await;
+
+    let result: TestResult<()> = client
+        .delete(&format!("/api/v1/projects/3S4F26A88N9PPAWD1PYDDFDR04"))
+        .await;
+
+    assert!(result.is_err());
+    assert!(
+        matches!(result, Err(TestError::RequestError(e)) if e.status().unwrap() == StatusCode::FORBIDDEN)
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+pub async fn viewer_cant_delete_projects() {
+    let (_app, client) = TestApp::start_and_connect(TestUser::Viewer).await;
+
+    let result: TestResult<()> = client
+        .delete(&format!("/api/v1/projects/3S4F26A88N9PPAWD1PYDDFDR04"))
+        .await;
+
+    assert!(result.is_err());
+    assert!(
+        matches!(result, Err(TestError::RequestError(e)) if e.status().unwrap() == StatusCode::FORBIDDEN)
+    );
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

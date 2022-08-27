@@ -1,21 +1,23 @@
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use axum::body::{boxed, Bytes, Full};
-use axum::extract::{FromRequest, RequestParts};
-use axum::http::{HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::BoxError;
+use axum::{
+    body::{boxed, Bytes, Full},
+    extract::{FromRequest, RequestParts},
+    http::{HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    BoxError,
+};
 use hyper::header::CONTENT_TYPE;
 use miette::{Diagnostic, SourceOffset};
 use mime_guess::mime;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_json::{json, Value};
+use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
-use crate::api::{ReportRenderer, ReportType};
-use crate::app::App;
+use crate::{
+    api::{GenericResponse, ReportRenderer, ReportType},
+    app::App,
+};
 
 /// Custom [`Json`] type to allow us to expose richer errors when deserialization
 /// fails.
@@ -89,7 +91,7 @@ fn json_buf_response(status: StatusCode, buf: Vec<u8>) -> Response {
         .expect("failed to build response")
 }
 
-fn json_response(status: StatusCode, body: Value) -> Response {
+fn json_response<T: Serialize>(status: StatusCode, body: T) -> Response {
     json_buf_response(status, serde_json::to_vec(&body).unwrap())
 }
 
@@ -117,10 +119,7 @@ where
             Err(e) => {
                 return Err(json_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({
-                        "result": "failure",
-                        "message": format!("failed to read request body: {}", e)
-                    }),
+                    GenericResponse::failure(format!("failed to read request body: {}", e)),
                 ))
             }
         };
@@ -130,10 +129,7 @@ where
             Err(e) => {
                 return Err(json_response(
                     StatusCode::BAD_REQUEST,
-                    json!({
-                        "result": "failure",
-                        "message": format!("request body is not UTF-8: {}", e)
-                    }),
+                    GenericResponse::failure(format!("request body is not UTF-8: {}", e)),
                 ))
             }
         };
@@ -175,10 +171,7 @@ where
                 } else {
                     Err(json_response(
                         StatusCode::UNPROCESSABLE_ENTITY,
-                        json!({
-                        "result": "failure",
-                        "message": format!("JSON parsing error: {}", err)
-                        }),
+                        GenericResponse::failure(format!("JSON parsing error: {}", err)),
                     ))
                 }
             }

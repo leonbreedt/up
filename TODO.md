@@ -1,7 +1,7 @@
 # TODO
 
-- add integration tests for APIs
-
+- complete integration tests for APIs
+  
 - add JWT issuing to server via simple login endpoint
   - use CA_CERTIFICATE, CERTIFICATE
 

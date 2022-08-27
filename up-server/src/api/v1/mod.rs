@@ -5,12 +5,11 @@ use axum::{
     Extension, Router,
 };
 use miette::Diagnostic;
-use serde_json::json;
 use thiserror::Error;
 
 use crate::{api::Json, app::App, auth::Identity, repository::RepositoryError};
 
-use super::{ReportRenderer, ReportType};
+use super::{GenericResponse, ReportRenderer, ReportType};
 
 pub mod checks;
 pub mod notifications;
@@ -122,16 +121,9 @@ impl IntoResponse for ApiError {
         };
 
         let body = if details.is_empty() {
-            Json(json!({
-                "result": "failure",
-                "message": message
-            }))
+            Json(GenericResponse::failure(message))
         } else {
-            Json(json!({
-                "result": "failure",
-                "message": message,
-                "details": details
-            }))
+            Json(GenericResponse::failure_with_details(message, details))
         };
 
         (status, body).into_response()

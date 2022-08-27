@@ -14,7 +14,7 @@ use hyper::{
     Body, Uri,
 };
 use miette::{Diagnostic, GraphicalReportHandler, JSONReportHandler, NarratableReportHandler};
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use up_core::jwt::Verifier;
 
 mod json;
@@ -22,6 +22,66 @@ mod ui;
 pub mod v1;
 
 use crate::{api::json::Json, auth, notifier::Notifier, repository::Repository};
+
+// Basic response status.
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ResponseStatus {
+    Success,
+    Failure,
+}
+
+/// Generic response for errors and/or simple APIs.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GenericResponse {
+    pub status: ResponseStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    pub details: Vec<String>,
+}
+
+impl GenericResponse {
+    fn success<S: AsRef<str>>(message: S) -> Self {
+        Self {
+            status: ResponseStatus::Success,
+            message: Some(message.as_ref().to_string()),
+            details: Vec::new(),
+        }
+    }
+
+    fn failure<S: AsRef<str>>(message: S) -> Self {
+        Self {
+            status: ResponseStatus::Failure,
+            message: Some(message.as_ref().to_string()),
+            details: Vec::new(),
+        }
+    }
+
+    fn failure_with_details<S: AsRef<str>>(message: S, details: Vec<String>) -> Self {
+        Self {
+            status: ResponseStatus::Failure,
+            message: Some(message.as_ref().to_string()),
+            details,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NotFoundResponse {
+    #[serde(flatten)]
+    inner: GenericResponse,
+    path: String,
+}
+
+impl NotFoundResponse {
+    pub fn new(uri: Uri) -> Self {
+        Self {
+            inner: GenericResponse::failure("not found"),
+            path: uri.path().to_string(),
+        }
+    }
+}
 
 /// Builds a new router, providing handlers with a [`Repository`]
 /// connected to the specified [`Database`].
@@ -40,14 +100,7 @@ pub fn build(repository: Repository, notifier: Notifier, verifier: Arc<Verifier>
 
 /// Fallback handler for non-matching routes.
 async fn not_found_handler(uri: Uri) -> impl IntoResponse {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({
-            "result": "failure",
-            "message": "not found",
-            "uri": uri.to_string()
-        })),
-    )
+    (StatusCode::NOT_FOUND, Json(NotFoundResponse::new(uri)))
 }
 
 /// Error handling middleware that converts error responses (e.g. from extractors)
@@ -64,11 +117,10 @@ async fn error_middleware<B>(req: Request<B>, next: Next<B>) -> Response {
     let (body, size) = if !head.status.is_success() {
         if let Some(value) = head.headers.get(CONTENT_TYPE) {
             if value != "application/json" {
-                let json_body = serde_json::to_string(&json!({
-                    "result": "failure",
-                    "message": std::str::from_utf8(&body_bytes).expect("failed to parse error response"),
-                }))
-                    .expect("failed to create error JSON body");
+                let json_body = serde_json::to_string(&GenericResponse::failure(
+                    std::str::from_utf8(&body_bytes).expect("failed to parse error response"),
+                ))
+                .expect("failed to create error JSON body");
 
                 let bytes = Bytes::from(json_body.as_bytes().to_vec());
                 let size = bytes.len();
