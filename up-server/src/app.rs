@@ -162,10 +162,10 @@ async fn shutdown_signal(
 #[derive(FromArgs)]
 /// The UP server.
 pub struct Args {
-    /// server address:port to listen on (default: 127.0.0.1:8080, PORT environment variable can override default port 8080)
+    /// server address:port to listen on (default: 0.0.0.0:8080, PORT environment variable can override default port 8080)
     #[argh(
         option,
-        default = "SocketAddr::from(([127, 0, 0, 1], default_listen_port()))"
+        default = "SocketAddr::from(([0, 0, 0, 0], default_listen_port()))"
     )]
     pub listen_address: SocketAddr,
     /// the database URL to connect to (default: postgres://127.0.0.1:5432/up, or DATABASE_URL environment variable)
