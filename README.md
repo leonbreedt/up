@@ -1,10 +1,9 @@
 # UP
 
 Monitor status of resources. Polls HTTP endpoints, or receives HTTP pings.
-Alerts on failure.
+Alerts on failure. Very alpha, no guarantees it even runs!
 
 # Features
 
 - Single-executable deployment
-- No external dependencies, uses a built-in SQLite database
 - Self-hostable
